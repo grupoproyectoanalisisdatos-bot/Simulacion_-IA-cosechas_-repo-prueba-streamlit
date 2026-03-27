@@ -72,14 +72,15 @@ def main():
             y tendencias geográficas de la cuenca. Diseñado para niveles de análisis integrador.
             """)
             
-            if st.button("🚀 Ingresar al Panel de Trabajo", use_container_width=True):
+            # Actualizado: use_container_width -> width='stretch'
+            if st.button("🚀 Ingresar al Panel de Trabajo", width='stretch'):
                 st.session_state.page = 'dashboard'
                 st.rerun()
         
         with col2:
             # Imagen temática del Río Magdalena
             st.image("https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?auto=format&fit=crop&q=80&w=800", 
-                     caption="Monitoreo de la Cuenca Hidrográfica", use_container_width=True)
+                     caption="Monitoreo de la Cuenca Hidrográfica", width='stretch')
 
     # --- DASHBOARD DE TRABAJO ---
     else:
@@ -107,7 +108,7 @@ def main():
 
             with tab_explora:
                 st.subheader("Vista Previa de los Datos Crudos")
-                st.dataframe(df.head(20), use_container_width=True)
+                st.dataframe(df.head(20), width='stretch')
                 
                 col_m1, col_m2, col_m3 = st.columns(3)
                 col_m1.metric("Total Registros", df.shape[0])
@@ -131,7 +132,7 @@ def main():
                         sel_col = st.selectbox("Seleccione una variable para ver su distribución", numeric_cols, key="dist_sel")
                         fig, ax = plt.subplots(figsize=(10, 5))
                         sns.histplot(df[sel_col], kde=True, color="#1e3a8a", ax=ax)
-                        plt.title(f"Distribución de {sel_col}")
+                        ax.set_title(f"Distribución de {sel_col}")
                         st.pyplot(fig)
                     with col_t1:
                         st.markdown('<span class="help-icon">❓ Ayuda Contextual</span>', unsafe_allow_html=True)
