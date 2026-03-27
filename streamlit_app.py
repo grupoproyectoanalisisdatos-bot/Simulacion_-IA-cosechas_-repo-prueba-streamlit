@@ -5,6 +5,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import kagglehub
 import os
+import zipfile
 import glob
 
 # Configuración de página con el nuevo estándar de Streamlit
@@ -33,15 +34,27 @@ st.markdown("""
 
 @st.cache_data(show_spinner="Accediendo a Kaggle y procesando archivos...")
 def load_data_from_kaggle():
-    """Descarga el dataset y busca archivos CSV de forma recursiva con diagnóstico."""
+    """Descarga el dataset, descomprime si es necesario y busca archivos CSV."""
     try:
         # Descarga la última versión del dataset
-        # El dataset corzogac/magdalena-colombia-data parece descargarse como una carpeta
         download_path = kagglehub.dataset_download("corzogac/magdalena-colombia-data")
         
-        # Búsqueda profunda de archivos CSV en todas las subcarpetas
+        # 1. VERIFICACIÓN Y DESCOMPRESIÓN MANUAL
+        # Si la ruta es un archivo o contiene archivos .archive/.zip, intentamos extraer
+        for root, dirs, files in os.walk(download_path):
+            for file in files:
+                if file.endswith(".zip") or file.endswith(".archive"):
+                    archive_path = os.path.join(root, file)
+                    try:
+                        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                            # Extraemos en la misma carpeta de descarga
+                            zip_ref.extractall(download_path)
+                    except Exception:
+                        pass # Si no es un zip válido, continuamos
+
+        # 2. BÚSQUEDA PROFUNDA DE CSV
         files_found = []
-        all_detected_files = [] # Para diagnóstico
+        all_detected_files = []
         
         for root, dirs, files in os.walk(download_path):
             for file in files:
@@ -51,7 +64,6 @@ def load_data_from_kaggle():
                     files_found.append(full_path)
         
         if not files_found:
-            # Si no hay CSV, informamos qué se encontró para ayudar al usuario
             st.session_state['debug_files'] = all_detected_files
             st.session_state['debug_path'] = download_path
             return None
@@ -59,18 +71,18 @@ def load_data_from_kaggle():
         # Seleccionamos el archivo con mayor tamaño (usualmente el dataset principal)
         target_file = max(files_found, key=os.path.getsize)
         
-        # Intentar leer con detección de errores de codificación
+        # 3. CARGA DE DATOS
         try:
-            # Primero intentamos con separador automático (coma o punto y coma)
+            # Intento con detección automática de separador
             df = pd.read_csv(target_file, sep=None, engine='python', encoding='utf-8')
         except Exception:
             try:
                 df = pd.read_csv(target_file, sep=None, engine='python', encoding='latin-1')
             except Exception as e:
-                st.error(f"No se pudo decodificar el archivo CSV: {e}")
+                st.error(f"Error de decodificación: {e}")
                 return None
             
-        # Limpieza técnica de nombres de columnas
+        # Limpieza de nombres de columnas
         df.columns = [
             str(c).lower().replace(' ', '_')
             .replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
@@ -78,7 +90,7 @@ def load_data_from_kaggle():
         ]
         return df
     except Exception as e:
-        st.error(f"Error crítico en la comunicación con Kaggle: {e}")
+        st.error(f"Error crítico de conexión: {e}")
         return None
 
 def main():
@@ -92,7 +104,7 @@ def main():
             st.markdown('<h1 class="main-title">Análisis Integrador: <br>Río Magdalena</h1>', unsafe_allow_html=True)
             st.markdown('<p class="subtitle">Exploración de datos socio-ambientales y recursos del departamento del Magdalena.</p>', unsafe_allow_html=True)
             
-            st.info("**Nivel Integrador:** Este panel utiliza inteligencia de datos para monitorear la cuenca más importante de Colombia.")
+            st.info("**Nivel Integrador:** Herramienta de inteligencia de datos para el monitoreo hidrológico y social.")
             
             if st.button("🚀 Ingresar al Panel de Trabajo", width='stretch'):
                 st.session_state.page = 'dashboard'
@@ -100,7 +112,7 @@ def main():
         
         with col2:
             st.image("https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?auto=format&fit=crop&q=80&w=800", 
-                     caption="Cuenca del Río Magdalena", width='stretch')
+                     caption="Vista del Río Magdalena", width='stretch')
 
     # --- DASHBOARD PRINCIPAL ---
     else:
@@ -110,18 +122,18 @@ def main():
                 st.session_state.page = 'landing'
                 st.rerun()
             st.divider()
-            st.write("**Servidor:** Streamlit Cloud")
-            st.write("**Estado:** Ejecutando diagnóstico")
+            st.write("**Entorno:** Streamlit Cloud")
+            st.write("**Estado:** Análisis en tiempo real")
             
-        # Intentar cargar los datos
+        # Carga de datos
         df = load_data_from_kaggle()
         
         if df is not None:
             st.sidebar.success("✅ Dataset Vinculado")
-            tab_data, tab_viz, tab_docs = st.tabs(["🔍 Exploración de Datos", "📈 Análisis Gráfico", "📖 Documentación"])
+            tab_data, tab_viz, tab_docs = st.tabs(["🔍 Exploración", "📈 Gráficos", "📖 Info"])
 
             with tab_data:
-                st.subheader("Vista Previa del Dataset")
+                st.subheader("Datos de la Cuenca")
                 st.dataframe(df.head(20), width='stretch')
                 
                 c1, c2, c3 = st.columns(3)
@@ -138,51 +150,39 @@ def main():
                 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
                 if numeric_cols:
-                    st.markdown("### 1. Distribución de Frecuencia")
+                    st.markdown("### 1. Distribución de Variables")
                     g1_col, t1_col = st.columns([2, 1])
                     with g1_col:
-                        var_sel = st.selectbox("Seleccione Variable", numeric_cols, key="s1")
+                        var_sel = st.selectbox("Seleccione Métrica", numeric_cols, key="s1")
                         fig1, ax1 = plt.subplots(figsize=(10, 5))
                         sns.histplot(df[var_sel], kde=True, color="#1e3a8a", ax=ax1)
-                        ax1.set_title(f"Distribución de {var_sel}")
                         st.pyplot(fig1)
                     with t1_col:
-                        st.markdown(f'<div class="help-card">💡 <b>Análisis:</b> La curva KDE muestra la densidad de los datos. Útil para detectar valores atípicos en la cuenca del Magdalena.</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="help-card">💡 <b>Nota:</b> El histograma muestra la frecuencia de los datos recolectados.</div>', unsafe_allow_html=True)
 
                     st.divider()
 
-                    st.markdown("### 2. Correlaciones Detectadas")
+                    st.markdown("### 2. Matriz de Correlación")
                     g2_col, t2_col = st.columns([2, 1])
                     with g2_col:
                         fig2, ax2 = plt.subplots(figsize=(10, 8))
                         sns.heatmap(df[numeric_cols].corr(), annot=True, cmap="mako", fmt=".2f", ax=ax2)
                         st.pyplot(fig2)
                     with t2_col:
-                        st.markdown('<div class="help-card">💡 <b>Interpretación:</b> Colores más claros indican una correlación positiva alta entre factores ambientales o socioeconómicos.</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="help-card">💡 <b>Nota:</b> Identifica la relación entre diferentes factores de la cuenca.</div>', unsafe_allow_html=True)
                 else:
-                    st.warning("No hay suficientes datos numéricos para procesar gráficos.")
+                    st.warning("No hay suficientes datos numéricos.")
 
             with tab_docs:
-                st.markdown("""
-                ### Ficha Metodológica
-                - **Ingesta**: Automatizada vía `kagglehub`.
-                - **Limpieza**: Normalización de cabeceras y manejo de encoding Latin-1/UTF-8.
-                - **Despliegue**: Optimizado para Streamlit Cloud 1.30+.
-                """)
+                st.markdown("### Ficha Técnica\nDataset descargado y procesado automáticamente desde Kaggle.")
         else:
-            # SECCIÓN DE DIAGNÓSTICO SI FALLA LA CARGA
-            st.markdown('<div class="error-box">⚠️ Error de Lectura: No se detectaron archivos CSV válidos.</div>', unsafe_allow_html=True)
-            
-            with st.expander("🛠 Ver Diagnóstico Técnico"):
+            # DIAGNÓSTICO
+            st.markdown('<div class="error-box">⚠️ Error: No se detectaron archivos CSV.</div>', unsafe_allow_html=True)
+            with st.expander("🛠 Detalles del Servidor"):
                 if 'debug_path' in st.session_state:
-                    st.write(f"**Ruta de descarga:** `{st.session_state['debug_path']}`")
+                    st.write(f"Ruta: `{st.session_state['debug_path']}`")
                 if 'debug_files' in st.session_state:
-                    st.write("**Archivos encontrados en la carpeta:**")
-                    st.write(st.session_state['debug_files'])
-                else:
-                    st.write("No se pudo listar ningún archivo. Es posible que la descarga fallara silenciosamente.")
-            
-            st.info("Sugerencia: Si ves archivos con extensión `.zip` o `.archive` en el diagnóstico, avísame para implementar un descompresor automático.")
+                    st.write("Archivos detectados:", st.session_state['debug_files'])
 
 if __name__ == "__main__":
     main()
