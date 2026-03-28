@@ -6,3 +6,4 @@ seaborn
 kagglehub
 scipy
 statsmodels
+openpyxl
