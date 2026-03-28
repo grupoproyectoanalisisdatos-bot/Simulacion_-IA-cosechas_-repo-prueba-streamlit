@@ -3,186 +3,184 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-import kagglehub
 import os
-import zipfile
-import glob
 
-# Configuración de página con el nuevo estándar de Streamlit
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="Data Analytics - Cuenca del Magdalena",
-    page_icon="🌊",
-    layout="wide"
+    page_title="Data Intelligence - Agro Clima",
+    page_icon="🌱",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Estilos CSS profesionales
+# --- ESTILOS PROFESIONALES (CSS) ---
 st.markdown("""
     <style>
-    .stApp { background-color: #f8f9fa; }
-    .main-title { color: #1e3a8a; font-size: 3rem; font-weight: 800; margin-bottom: 0.5rem; }
-    .subtitle { color: #64748b; font-size: 1.2rem; margin-bottom: 2rem; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { 
-        height: 50px; background-color: #f1f5f9; 
-        border-radius: 5px 5px 0 0; padding: 10px 20px;
+    /* Estilo General */
+    .main { background-color: #f4f7f9; }
+    .stApp { background-image: linear-gradient(0deg, #f4f7f9 0%, #ffffff 100%); }
+    
+    /* Landing Page */
+    .landing-card {
+        background: white; padding: 2rem; border-radius: 15px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.05); border-left: 8px solid #1e3a8a;
     }
-    .stTabs [aria-selected="true"] { background-color: #1e3a8a !important; color: white !important; }
-    .help-card { background-color: #e2e8f0; padding: 15px; border-radius: 8px; border-left: 5px solid #1e3a8a; }
-    .error-box { background-color: #fee2e2; border: 1px solid #ef4444; padding: 15px; border-radius: 8px; color: #b91c1c; }
+    .main-title { color: #1e3a8a; font-size: 3.5rem; font-weight: 800; margin-bottom: 0px; }
+    .sub-title { color: #64748b; font-size: 1.2rem; margin-bottom: 2rem; }
+    
+    /* Ayuda e Iconos */
+    .help-icon { color: #3b82f6; cursor: help; font-size: 0.9rem; margin-left: 5px; }
+    .doc-section { background: #f8fafc; padding: 1rem; border-radius: 8px; border: 1px solid #e2e8f0; }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] { background-color: #1e293b; color: white; }
+    [data-testid="stSidebar"] * { color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-@st.cache_data(show_spinner="Accediendo a Kaggle y procesando archivos...")
-def load_data_from_kaggle():
-    """Descarga el dataset, descomprime si es necesario y busca archivos CSV."""
+# --- CARGA DE DATOS ---
+@st.cache_data
+def load_data():
+    files = {
+        "Temperatura": "Datos para la Base de Datos - Temperatura.csv",
+        "Precipitación": "Datos para la Base de Datos - Precipitacion.csv",
+        "Brillo Solar": "Datos para la Base de Datos - Brillo Solar.csv",
+        "Producción": "Datos para la Base de Datos - Produccion.csv"
+    }
+    dfs = {}
     try:
-        # Descarga la última versión del dataset
-        download_path = kagglehub.dataset_download("corzogac/magdalena-colombia-data")
-        
-        # 1. VERIFICACIÓN Y DESCOMPRESIÓN MANUAL
-        # Si la ruta es un archivo o contiene archivos .archive/.zip, intentamos extraer
-        for root, dirs, files in os.walk(download_path):
-            for file in files:
-                if file.endswith(".zip") or file.endswith(".archive"):
-                    archive_path = os.path.join(root, file)
-                    try:
-                        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
-                            # Extraemos en la misma carpeta de descarga
-                            zip_ref.extractall(download_path)
-                    except Exception:
-                        pass # Si no es un zip válido, continuamos
-
-        # 2. BÚSQUEDA PROFUNDA DE CSV
-        files_found = []
-        all_detected_files = []
-        
-        for root, dirs, files in os.walk(download_path):
-            for file in files:
-                full_path = os.path.join(root, file)
-                all_detected_files.append(file)
-                if file.lower().endswith(".csv"):
-                    files_found.append(full_path)
-        
-        if not files_found:
-            st.session_state['debug_files'] = all_detected_files
-            st.session_state['debug_path'] = download_path
-            return None
-        
-        # Seleccionamos el archivo con mayor tamaño (usualmente el dataset principal)
-        target_file = max(files_found, key=os.path.getsize)
-        
-        # 3. CARGA DE DATOS
-        try:
-            # Intento con detección automática de separador
-            df = pd.read_csv(target_file, sep=None, engine='python', encoding='utf-8')
-        except Exception:
-            try:
-                df = pd.read_csv(target_file, sep=None, engine='python', encoding='latin-1')
-            except Exception as e:
-                st.error(f"Error de decodificación: {e}")
-                return None
-            
-        # Limpieza de nombres de columnas
-        df.columns = [
-            str(c).lower().replace(' ', '_')
-            .replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
-            .strip() for c in df.columns
-        ]
-        return df
+        for key, path in files.items():
+            if os.path.exists(path):
+                df = pd.read_csv(path)
+                # Limpieza de columnas (quitar los dos puntos ":")
+                df.columns = [c.replace(':', '').strip() for c in df.columns]
+                dfs[key] = df
+        return dfs
     except Exception as e:
-        st.error(f"Error crítico de conexión: {e}")
+        st.error(f"Error cargando archivos: {e}")
         return None
 
-def main():
-    if 'page' not in st.session_state:
-        st.session_state.page = 'landing'
+# --- LÓGICA DE NAVEGACIÓN ---
+if 'auth' not in st.session_state:
+    st.session_state.auth = False
 
+def enter_dashboard():
+    st.session_state.auth = True
+
+# --- RENDERIZADO ---
+dfs = load_data()
+
+if not st.session_state.auth:
     # --- LANDING PAGE ---
-    if st.session_state.page == 'landing':
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            st.markdown('<h1 class="main-title">Análisis Integrador: <br>Río Magdalena</h1>', unsafe_allow_html=True)
-            st.markdown('<p class="subtitle">Exploración de datos socio-ambientales y recursos del departamento del Magdalena.</p>', unsafe_allow_html=True)
-            
-            st.info("**Nivel Integrador:** Herramienta de inteligencia de datos para el monitoreo hidrológico y social.")
-            
-            if st.button("🚀 Ingresar al Panel de Trabajo", width='stretch'):
-                st.session_state.page = 'dashboard'
-                st.rerun()
+    col1, col2 = st.columns([1.2, 0.8])
+    
+    with col1:
+        st.markdown('<h1 class="main-title">Agro-Clima <br>Intelligence</h1>', unsafe_allow_html=True)
+        st.markdown('<p class="sub-title">Plataforma avanzada de análisis predictivo y descriptivo para el sector agrícola y monitoreo climático regional.</p>', unsafe_allow_html=True)
         
-        with col2:
-            st.image("https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?auto=format&fit=crop&q=80&w=800", 
-                     caption="Vista del Río Magdalena", width='stretch')
+        with st.container():
+            st.markdown("""
+            <div class="landing-card">
+                <h3>Sobre el Dataset</h3>
+                <p>Este sistema integra variables de <b>Temperatura, Precipitación y Brillo Solar</b> junto con métricas de <b>Producción Agrícola</b> para identificar patrones de rendimiento y riesgo climático.</p>
+                <ul>
+                    <li>Análisis por Municipio</li>
+                    <li>Correlación Clima-Cosecha</li>
+                    <li>Distribuciones Estadísticas</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("")
+        st.button("🚀 Ingresar al Panel de Trabajo", on_click=enter_dashboard, type="primary", use_container_width=True)
 
-    # --- DASHBOARD PRINCIPAL ---
-    else:
-        with st.sidebar:
-            st.title("📊 Navegación")
-            if st.button("⬅ Volver al Inicio"):
-                st.session_state.page = 'landing'
-                st.rerun()
+    with col2:
+        # Imagen representativa del tema
+        st.image("https://images.unsplash.com/photo-1523348837708-15d4a09cfac2?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80", 
+                 caption="Tecnología Aplicada al Campo", use_container_width=True)
+
+else:
+    # --- DASHBOARD PANEL ---
+    with st.sidebar:
+        st.image("https://cdn-icons-png.flaticon.com/512/2610/2610098.png", width=100)
+        st.title("Data Expert Panel")
+        dataset_name = st.selectbox("Seleccione Dataset", list(dfs.keys()))
+        if st.button("⬅ Cerrar Sesión"):
+            st.session_state.auth = False
+            st.rerun()
+
+    df = dfs[dataset_name]
+
+    # Tabs de navegación profesional
+    tab1, tab2, tab3 = st.tabs(["📊 Visualización Crítica", "📄 Exploración de Datos", "📖 Documentación Técnica"])
+
+    with tab1:
+        st.subheader(f"Análisis Avanzado: {dataset_name}")
+        
+        # Métricas principales
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Registros Totales", f"{len(df):,}")
+        m2.metric("Municipios", len(df['Municipio'].unique()) if 'Municipio' in df.columns else "N/A")
+        if 'Valor' in df.columns:
+            m3.metric("Promedio General", f"{df['Valor'].mean():.2f}")
+
+        st.divider()
+
+        # Gráficos con Seaborn
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+        if numeric_cols:
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                st.markdown(f"**Distribución de Frecuencia** <span title='Muestra la densidad de los datos y su concentración.' class='help-icon'>❓</span>", unsafe_allow_html=True)
+                var_sel = st.selectbox("Seleccione Variable", numeric_cols, key="v1")
+                fig, ax = plt.subplots(figsize=(10, 6))
+                sns.histplot(df[var_sel], kde=True, color="#1e3a8a", ax=ax)
+                ax.set_title(f"Histograma de {var_sel}")
+                st.pyplot(fig)
+                st.info(f"ℹ️ **Explicación:** Este gráfico permite identificar el sesgo de la variable {var_sel} y detectar valores atípicos (outliers).")
+
+            with col_b:
+                st.markdown(f"**Comportamiento por Municipio** <span title='Comparativa de medias por localidad.' class='help-icon'>❓</span>", unsafe_allow_html=True)
+                if 'Municipio' in df.columns:
+                    # Top 10 municipios por valor medio
+                    top_10 = df.groupby('Municipio')[var_sel].mean().sort_values(ascending=False).head(10)
+                    fig2, ax2 = plt.subplots(figsize=(10, 6))
+                    sns.barplot(x=top_10.values, y=top_10.index, palette="viridis", ax=ax2)
+                    ax2.set_title(f"Top 10 Municipios ({var_sel})")
+                    st.pyplot(fig2)
+                    st.info("ℹ️ **Explicación:** Muestra qué municipios presentan los promedios más altos para la variable seleccionada.")
+
             st.divider()
-            st.write("**Entorno:** Streamlit Cloud")
-            st.write("**Estado:** Análisis en tiempo real")
-            
-        # Carga de datos
-        df = load_data_from_kaggle()
-        
-        if df is not None:
-            st.sidebar.success("✅ Dataset Vinculado")
-            tab_data, tab_viz, tab_docs = st.tabs(["🔍 Exploración", "📈 Gráficos", "📖 Info"])
 
-            with tab_data:
-                st.subheader("Datos de la Cuenca")
-                st.dataframe(df.head(20), width='stretch')
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Registros", f"{df.shape[0]:,}")
-                c2.metric("Variables", df.shape[1])
-                c3.metric("Datos Nulos", df.isna().sum().sum())
-                
-                st.divider()
-                st.write("**Resumen Estadístico:**")
-                st.write(df.describe())
+            if dataset_name == "Producción":
+                st.markdown(f"**Análisis de Rendimiento (Área vs Producción)** <span title='Correlación entre siembra y cosecha.' class='help-icon'>❓</span>", unsafe_allow_html=True)
+                fig3, ax3 = plt.subplots(figsize=(12, 5))
+                sns.regplot(data=df, x='Area Sembrada', y='Produccion', scatter_kws={'alpha':0.5}, line_kws={'color':'red'}, ax=ax3)
+                st.pyplot(fig3)
+                st.info("ℹ️ **Explicación:** La línea de regresión indica la eficiencia. Si los puntos están muy dispersos de la línea roja, hay variabilidad en el rendimiento por hectárea.")
 
-            with tab_viz:
-                sns.set_theme(style="darkgrid")
-                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    with tab2:
+        st.subheader("Raw Data Inspection")
+        st.dataframe(df, use_container_width=True)
+        st.download_button("📥 Descargar este conjunto de datos", df.to_csv(index=False), f"{dataset_name}.csv", "text/csv")
 
-                if numeric_cols:
-                    st.markdown("### 1. Distribución de Variables")
-                    g1_col, t1_col = st.columns([2, 1])
-                    with g1_col:
-                        var_sel = st.selectbox("Seleccione Métrica", numeric_cols, key="s1")
-                        fig1, ax1 = plt.subplots(figsize=(10, 5))
-                        sns.histplot(df[var_sel], kde=True, color="#1e3a8a", ax=ax1)
-                        st.pyplot(fig1)
-                    with t1_col:
-                        st.markdown('<div class="help-card">💡 <b>Nota:</b> El histograma muestra la frecuencia de los datos recolectados.</div>', unsafe_allow_html=True)
+    with tab3:
+        st.markdown(f"""
+        <div class="doc-section">
+            <h3>📖 Documentación: {dataset_name}</h3>
+            <p>Este dataset contiene información recolectada de estaciones regionales y reportes municipales.</p>
+            <hr>
+            <h4>Metodología de Análisis:</h4>
+            <ul>
+                <li><b>Tratamiento de Nulos:</b> Los datos faltantes han sido omitidos en los cálculos estadísticos.</li>
+                <li><b>Normalización:</b> Los nombres de las columnas han sido estandarizados para evitar errores de sintaxis en el código.</li>
+                <li><b>Herramientas:</b> Visualizaciones generadas con <i>Seaborn 0.13.0</i> para alta fidelidad estadística.</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
 
-                    st.divider()
-
-                    st.markdown("### 2. Matriz de Correlación")
-                    g2_col, t2_col = st.columns([2, 1])
-                    with g2_col:
-                        fig2, ax2 = plt.subplots(figsize=(10, 8))
-                        sns.heatmap(df[numeric_cols].corr(), annot=True, cmap="mako", fmt=".2f", ax=ax2)
-                        st.pyplot(fig2)
-                    with t2_col:
-                        st.markdown('<div class="help-card">💡 <b>Nota:</b> Identifica la relación entre diferentes factores de la cuenca.</div>', unsafe_allow_html=True)
-                else:
-                    st.warning("No hay suficientes datos numéricos.")
-
-            with tab_docs:
-                st.markdown("### Ficha Técnica\nDataset descargado y procesado automáticamente desde Kaggle.")
-        else:
-            # DIAGNÓSTICO
-            st.markdown('<div class="error-box">⚠️ Error: No se detectaron archivos CSV.</div>', unsafe_allow_html=True)
-            with st.expander("🛠 Detalles del Servidor"):
-                if 'debug_path' in st.session_state:
-                    st.write(f"Ruta: `{st.session_state['debug_path']}`")
-                if 'debug_files' in st.session_state:
-                    st.write("Archivos detectados:", st.session_state['debug_files'])
-
-if __name__ == "__main__":
-    main()
+# Footer
+st.markdown("---")
+st.caption("Panel de Inteligencia de Datos v2.0 | Desarrollado por Expert Data Analyst")
