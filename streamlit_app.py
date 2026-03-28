@@ -48,17 +48,26 @@ def load_data():
         "Producción": "Datos para la Base de Datos - Produccion.csv"
     }
     dfs = {}
-    try:
-        for key, path in files.items():
-            if os.path.exists(path):
+    files_not_found = []
+    
+    for key, path in files.items():
+        if os.path.exists(path):
+            try:
                 df = pd.read_csv(path)
                 # Limpieza de columnas (quitar los dos puntos ":")
                 df.columns = [c.replace(':', '').strip() for c in df.columns]
+                
+                # Convertir 'Valor' a numérico si existe (manejo de puntos/comas)
+                if 'Valor' in df.columns:
+                    df['Valor'] = pd.to_numeric(df['Valor'].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+                
                 dfs[key] = df
-        return dfs
-    except Exception as e:
-        st.error(f"Error cargando archivos: {e}")
-        return None
+            except Exception as e:
+                st.error(f"Error al procesar {key}: {e}")
+        else:
+            files_not_found.append(path)
+            
+    return dfs, files_not_found
 
 # --- LÓGICA DE NAVEGACIÓN ---
 if 'auth' not in st.session_state:
@@ -68,7 +77,13 @@ def enter_dashboard():
     st.session_state.auth = True
 
 # --- RENDERIZADO ---
-dfs = load_data()
+dfs, missing = load_data()
+
+# Validar si no hay datos cargados en absoluto
+if not dfs:
+    st.error("❌ No se encontraron archivos de datos.")
+    st.info(f"Asegúrate de subir los archivos al repositorio: {', '.join(missing)}")
+    st.stop()
 
 if not st.session_state.auth:
     # --- LANDING PAGE ---
@@ -95,7 +110,6 @@ if not st.session_state.auth:
         st.button("🚀 Ingresar al Panel de Trabajo", on_click=enter_dashboard, type="primary", use_container_width=True)
 
     with col2:
-        # Imagen representativa del tema
         st.image("https://images.unsplash.com/photo-1523348837708-15d4a09cfac2?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80", 
                  caption="Tecnología Aplicada al Campo", use_container_width=True)
 
@@ -104,83 +118,92 @@ else:
     with st.sidebar:
         st.image("https://cdn-icons-png.flaticon.com/512/2610/2610098.png", width=100)
         st.title("Data Expert Panel")
-        dataset_name = st.selectbox("Seleccione Dataset", list(dfs.keys()))
+        
+        # Selección segura del dataset
+        options = list(dfs.keys())
+        dataset_name = st.selectbox("Seleccione Dataset", options)
+        
         if st.button("⬅ Cerrar Sesión"):
             st.session_state.auth = False
             st.rerun()
 
-    df = dfs[dataset_name]
+    # Acceso seguro al DataFrame
+    df = dfs.get(dataset_name)
+    
+    if df is not None:
+        # Tabs de navegación profesional
+        tab1, tab2, tab3 = st.tabs(["📊 Visualización Crítica", "📄 Exploración de Datos", "📖 Documentación Técnica"])
 
-    # Tabs de navegación profesional
-    tab1, tab2, tab3 = st.tabs(["📊 Visualización Crítica", "📄 Exploración de Datos", "📖 Documentación Técnica"])
-
-    with tab1:
-        st.subheader(f"Análisis Avanzado: {dataset_name}")
-        
-        # Métricas principales
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Registros Totales", f"{len(df):,}")
-        m2.metric("Municipios", len(df['Municipio'].unique()) if 'Municipio' in df.columns else "N/A")
-        if 'Valor' in df.columns:
-            m3.metric("Promedio General", f"{df['Valor'].mean():.2f}")
-
-        st.divider()
-
-        # Gráficos con Seaborn
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
-        if numeric_cols:
-            col_a, col_b = st.columns(2)
+        with tab1:
+            st.subheader(f"Análisis Avanzado: {dataset_name}")
             
-            with col_a:
-                st.markdown(f"**Distribución de Frecuencia** <span title='Muestra la densidad de los datos y su concentración.' class='help-icon'>❓</span>", unsafe_allow_html=True)
-                var_sel = st.selectbox("Seleccione Variable", numeric_cols, key="v1")
-                fig, ax = plt.subplots(figsize=(10, 6))
-                sns.histplot(df[var_sel], kde=True, color="#1e3a8a", ax=ax)
-                ax.set_title(f"Histograma de {var_sel}")
-                st.pyplot(fig)
-                st.info(f"ℹ️ **Explicación:** Este gráfico permite identificar el sesgo de la variable {var_sel} y detectar valores atípicos (outliers).")
-
-            with col_b:
-                st.markdown(f"**Comportamiento por Municipio** <span title='Comparativa de medias por localidad.' class='help-icon'>❓</span>", unsafe_allow_html=True)
-                if 'Municipio' in df.columns:
-                    # Top 10 municipios por valor medio
-                    top_10 = df.groupby('Municipio')[var_sel].mean().sort_values(ascending=False).head(10)
-                    fig2, ax2 = plt.subplots(figsize=(10, 6))
-                    sns.barplot(x=top_10.values, y=top_10.index, palette="viridis", ax=ax2)
-                    ax2.set_title(f"Top 10 Municipios ({var_sel})")
-                    st.pyplot(fig2)
-                    st.info("ℹ️ **Explicación:** Muestra qué municipios presentan los promedios más altos para la variable seleccionada.")
+            # Métricas principales
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Registros Totales", f"{len(df):,}")
+            m2.metric("Municipios", len(df['Municipio'].unique()) if 'Municipio' in df.columns else "N/A")
+            
+            if 'Valor' in df.columns:
+                val_mean = df['Valor'].mean()
+                m3.metric("Promedio General", f"{val_mean:.2f}" if not np.isnan(val_mean) else "N/A")
 
             st.divider()
 
-            if dataset_name == "Producción":
-                st.markdown(f"**Análisis de Rendimiento (Área vs Producción)** <span title='Correlación entre siembra y cosecha.' class='help-icon'>❓</span>", unsafe_allow_html=True)
-                fig3, ax3 = plt.subplots(figsize=(12, 5))
-                sns.regplot(data=df, x='Area Sembrada', y='Produccion', scatter_kws={'alpha':0.5}, line_kws={'color':'red'}, ax=ax3)
-                st.pyplot(fig3)
-                st.info("ℹ️ **Explicación:** La línea de regresión indica la eficiencia. Si los puntos están muy dispersos de la línea roja, hay variabilidad en el rendimiento por hectárea.")
+            # Gráficos con Seaborn
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
-    with tab2:
-        st.subheader("Raw Data Inspection")
-        st.dataframe(df, use_container_width=True)
-        st.download_button("📥 Descargar este conjunto de datos", df.to_csv(index=False), f"{dataset_name}.csv", "text/csv")
+            if numeric_cols:
+                col_a, col_b = st.columns(2)
+                
+                with col_a:
+                    st.markdown(f"**Distribución de Frecuencia** <span title='Muestra la densidad de los datos.' class='help-icon'>❓</span>", unsafe_allow_html=True)
+                    var_sel = st.selectbox("Seleccione Variable", numeric_cols, key="v1")
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    sns.histplot(df[var_sel].dropna(), kde=True, color="#1e3a8a", ax=ax)
+                    ax.set_title(f"Histograma de {var_sel}")
+                    st.pyplot(fig)
+                    st.info(f"ℹ️ **Explicación:** Identifica el sesgo de {var_sel} y detecta valores atípicos.")
 
-    with tab3:
-        st.markdown(f"""
-        <div class="doc-section">
-            <h3>📖 Documentación: {dataset_name}</h3>
-            <p>Este dataset contiene información recolectada de estaciones regionales y reportes municipales.</p>
-            <hr>
-            <h4>Metodología de Análisis:</h4>
-            <ul>
-                <li><b>Tratamiento de Nulos:</b> Los datos faltantes han sido omitidos en los cálculos estadísticos.</li>
-                <li><b>Normalización:</b> Los nombres de las columnas han sido estandarizados para evitar errores de sintaxis en el código.</li>
-                <li><b>Herramientas:</b> Visualizaciones generadas con <i>Seaborn 0.13.0</i> para alta fidelidad estadística.</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
+                with col_b:
+                    st.markdown(f"**Comportamiento por Municipio** <span title='Comparativa de medias.' class='help-icon'>❓</span>", unsafe_allow_html=True)
+                    if 'Municipio' in df.columns:
+                        top_10 = df.groupby('Municipio')[var_sel].mean().sort_values(ascending=False).head(10)
+                        fig2, ax2 = plt.subplots(figsize=(10, 6))
+                        sns.barplot(x=top_10.values, y=top_10.index, palette="viridis", ax=ax2)
+                        ax2.set_title(f"Top 10 Municipios ({var_sel})")
+                        st.pyplot(fig2)
+                        st.info("ℹ️ **Explicación:** Muestra municipios con promedios más altos para la variable.")
+
+                st.divider()
+
+                if dataset_name == "Producción":
+                    st.markdown(f"**Análisis de Rendimiento (Área vs Producción)** <span title='Correlación.' class='help-icon'>❓</span>", unsafe_allow_html=True)
+                    fig3, ax3 = plt.subplots(figsize=(12, 5))
+                    # Asegurar que no haya nulos para el gráfico de regresión
+                    df_plot = df[['Area Sembrada', 'Produccion']].dropna()
+                    sns.regplot(data=df_plot, x='Area Sembrada', y='Produccion', scatter_kws={'alpha':0.5}, line_kws={'color':'red'}, ax=ax3)
+                    st.pyplot(fig3)
+                    st.info("ℹ️ **Explicación:** La línea roja indica la tendencia central del rendimiento.")
+
+        with tab2:
+            st.subheader("Raw Data Inspection")
+            st.dataframe(df, use_container_width=True)
+            st.download_button("📥 Descargar este conjunto de datos", df.to_csv(index=False), f"{dataset_name}.csv", "text/csv")
+
+        with tab3:
+            st.markdown(f"""
+            <div class="doc-section">
+                <h3>📖 Documentación: {dataset_name}</h3>
+                <p>Este dataset contiene información recolectada de estaciones regionales y reportes municipales.</p>
+                <hr>
+                <h4>Metodología de Análisis:</h4>
+                <ul>
+                    <li><b>Tratamiento de Datos:</b> Se han limpiado caracteres especiales en cabeceras y normalizado formatos numéricos.</li>
+                    <li><b>Validación:</b> Los cálculos omiten automáticamente valores nulos (NaN).</li>
+                    <li><b>Herramientas:</b> Visualizaciones optimizadas con Seaborn para entornos científicos.</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
 
 # Footer
 st.markdown("---")
-st.caption("Panel de Inteligencia de Datos v2.0 | Desarrollado por Expert Data Analyst")
+st.caption("Panel de Inteligencia de Datos v2.1 | Desarrollado por Expert Data Analyst")
