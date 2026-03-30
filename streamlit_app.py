@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -70,7 +69,7 @@ def load_data():
         if os.path.exists(path):
             try:
                 df = pd.read_csv(path)
-                # Limpieza de espacios en nombres de columnas para evitar KeyError
+                # MEJORA: Limpieza de espacios en nombres de columnas para evitar KeyError
                 df.columns = [str(c).strip() for c in df.columns]
                 
                 # Conversión de tipos de datos comunes
@@ -91,7 +90,7 @@ datasets = load_data()
 # --- VALIDACIÓN DE DATOS ---
 if datasets.get("prod") is None:
     st.error("⚠️ Error Crítico: No se encontró el archivo de 'Produccion.csv' en el directorio raíz.")
-    st.info("Asegúrate de que los archivos CSV estén en la carpeta principal del repositorio.")
+    st.info("Asegúrate de que los archivos CSV estén en la carpeta principal del repositorio de GitHub.")
     st.stop()
 
 df_prod = datasets["prod"]
@@ -106,7 +105,7 @@ with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2103/2103633.png", width=80)
     st.header("📍 Filtros de Análisis")
     
-    # Identificación segura de la columna de municipio
+    # MEJORA: Identificación segura de la columna de municipio (evita errores por nombres distintos)
     col_mun = 'Municipio' if 'Municipio' in df_prod.columns else df_prod.columns[0]
     municipios = sorted(df_prod[col_mun].dropna().unique())
     
@@ -149,8 +148,9 @@ with col4:
     if df_temp is not None:
         col_t_mun = 'Municipio:' if 'Municipio:' in df_temp.columns else 'Municipio'
         if col_t_mun in df_temp.columns:
+            # Filtrado por el municipio seleccionado
             val = df_temp[df_temp[col_t_mun] == mun_sel]['Valor:'].mean() if 'Valor:' in df_temp.columns else None
-            if val is not None:
+            if val is not None and not np.isnan(val):
                 temp_val = f"{val:.1f} °C"
     st.markdown(f'<div class="metric-card">', unsafe_allow_html=True)
     st.metric("Temp. Promedio", temp_val)
@@ -163,6 +163,8 @@ c_map, c_action = st.columns([2, 1])
 with c_map:
     st.subheader("🗺️ Geo-localización de Lotes")
     if df_temp is not None and 'Latitud:' in df_temp.columns:
+        # MEJORA: Mapa Robusto con normalización de coordenadas
+        col_t_mun = 'Municipio:' if 'Municipio:' in df_temp.columns else 'Municipio'
         df_map = df_temp[df_temp[col_t_mun] == mun_sel].copy()
         
         def normalize_coord(x):
@@ -170,6 +172,7 @@ with c_map:
                 # Limpieza de formato para asegurar compatibilidad con st.map
                 s = str(x).replace(".", "").replace("-", "")
                 if len(s) < 2: return 0.0
+                # Convierte formato largo a decimal estándar
                 return float(s[0] + "." + s[1:6])
             except: return 0.0
 
@@ -177,12 +180,18 @@ with c_map:
         # Longitud generalmente negativa para Colombia
         df_map['lon'] = df_map['Longitud:'].apply(lambda x: -normalize_coord(x))
         
-        st.map(df_map[['lat', 'lon']], zoom=10)
+        # Eliminar filas con coordenadas en 0 para no ensuciar el mapa
+        df_map = df_map[(df_map['lat'] != 0) & (df_map['lon'] != 0)]
+        
+        if not df_map.empty:
+            st.map(df_map[['lat', 'lon']], zoom=10)
+        else:
+            st.info("No hay coordenadas válidas para mostrar en este municipio.")
     else:
         st.warning("No hay coordenadas GPS procesables para este municipio.")
 
 with c_action:
-    st.subheader("🎯 Acciones Sugeridas")
+    st.subheader("🎯 Dashboard de Decisiones")
     if rend_medio < 1.0:
         st.error("🚨 **Alerta de Rendimiento:** La producción está por debajo del umbral crítico. Se recomienda auditoría de suelos.")
     else:
@@ -196,7 +205,7 @@ with c_action:
 st.divider()
 st.subheader("📈 Evolución de Rendimiento por Producto")
 if 'Año' in data_mun.columns and 'Rendimiento' in data_mun.columns:
-    # Agrupar datos para evitar líneas confusas si hay múltiples entradas por año
+    # MEJORA: Agrupar datos para evitar líneas confusas si hay múltiples entradas por año
     plot_data = data_mun.groupby(['Año', 'Producto'])['Rendimiento'].mean().reset_index()
     fig = px.line(plot_data, x='Año', y='Rendimiento', color='Producto',
                   markers=True, title="Histórico de Rendimiento (T/Ha)",
