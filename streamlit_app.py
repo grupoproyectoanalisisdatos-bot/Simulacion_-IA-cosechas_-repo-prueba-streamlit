@@ -4,138 +4,98 @@ import numpy as np
 import os
 import sys
 import subprocess
-import time
 
-# --- LÓGICA DE INSTALACIÓN FORZADA ---
-def ensure_dependencies():
-    """Intenta importar plotly, si falla lo instala y recarga el entorno."""
+# --- AUTO-INSTALACIÓN DE DEPENDENCIAS ---
+def install_requirements():
     try:
-        import plotly.express as px
+        import plotly
+        import openpyxl
         return True
     except ImportError:
         try:
-            # Comando de instalación silenciosa
             subprocess.check_call([sys.executable, "-m", "pip", "install", "plotly", "pandas", "openpyxl"])
-            import site
-            from importlib import reload
-            reload(site)
             return True
-        except Exception as e:
+        except:
             return False
 
-# Ejecutar verificación de dependencias
-PLOTLY_READY = ensure_dependencies()
+READY = install_requirements()
 
-# Importaciones tras validación
-try:
-    import plotly.express as px
-    import plotly.graph_objects as go
-except ImportError:
-    PLOTLY_READY = False
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="IA Cosechas - Verificador", layout="wide")
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(
-    page_title="IA Cosechas | Simulación Pro",
-    page_icon="🌾",
-    layout="wide"
-)
-
-# --- ESTILOS PERSONALIZADOS (Corrección de unsafe_allow_html) ---
+# CORRECCIÓN CRÍTICA: El parámetro es unsafe_allow_html (no unsafe_allow_stdio)
 st.markdown("""
     <style>
-    .main { background-color: #f5f7f9; }
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .main { background-color: #f0f2f6; }
+    .stAlert { border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- BARRA LATERAL: ESTADO Y SISTEMA ---
-with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/agriculture.png", width=80)
-    st.title("Panel de Control")
+st.title("🌾 Verificador de Datos e IA de Cosechas")
+
+# --- SECCIÓN 1: EXPLORADOR DE ARCHIVOS (Para verificar el repositorio) ---
+with st.expander("🔍 Verificar Archivos en el Repositorio", expanded=True):
+    current_files = os.listdir(".")
+    st.write("Archivos detectados en la raíz del proyecto:")
     
-    if PLOTLY_READY:
-        st.success("✅ Motor Gráfico: Activo")
-    else:
-        st.error("❌ Motor Gráfico: Fallido")
+    # Buscamos coincidencias con tus archivos
+    target_files = ["Produccion", "Temperatura"]
+    found_files = {}
     
-    st.divider()
-    st.subheader("🛠️ Info de Entorno")
-    st.caption(f"Python: {sys.version.split()[0]}")
+    cols = st.columns(len(current_files) // 5 + 1)
+    for i, file in enumerate(sorted(current_files)):
+        with cols[i % len(cols)]:
+            if "csv" in file.lower():
+                st.code(f"📄 {file}")
+                if "produccion" in file.lower(): found_files["Producción"] = file
+                if "temperatura" in file.lower(): found_files["Temperatura"] = file
+            else:
+                st.text(f"📁 {file}")
+
+# --- SECCIÓN 2: CARGA DE DATOS ---
+st.divider()
+
+def load_data(file_name):
+    if not file_name: return None
+    try:
+        # Intento de carga con diferentes encodings por si es CSV de Excel
+        return pd.read_csv(file_name, encoding='utf-8')
+    except:
+        try:
+            return pd.read_csv(file_name, encoding='latin1', sep=None, engine='python')
+        except Exception as e:
+            st.error(f"Error cargando {file_name}: {e}")
+            return None
+
+# Intentar cargar si se encontraron
+data_p = load_data(found_files.get("Producción"))
+data_t = load_data(found_files.get("Temperatura"))
+
+if data_p is not None:
+    st.success(f"✅ Datos de Producción cargados: {found_files['Producción']}")
     
-    if st.button("🔄 Forzar Reinstalación"):
-        st.cache_data.clear()
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "plotly"])
-        st.rerun()
-
-# --- CARGA DE DATOS ---
-@st.cache_data
-def get_data():
-    # Nombres exactos detectados en los logs
-    files = {
-        "Producción": "Datos para la Base de Datos - Produccion.csv",
-        "Temperatura": "Datos para la Base de Datos - Temperatura.csv"
-    }
-    loaded = {}
-    for key, path in files.items():
-        if os.path.exists(path):
-            try:
-                # Intento de lectura robusta
-                loaded[key] = pd.read_csv(path, encoding='utf-8')
-            except:
-                try: loaded[key] = pd.read_csv(path, encoding='latin1')
-                except: pass
-    return loaded
-
-# --- CUERPO PRINCIPAL ---
-st.title("🌾 Análisis de Cosechas con IA")
-st.subheader("Simulación y Visualización de Datos Agrícolas")
-
-datasets = get_data()
-
-if not datasets:
-    st.warning("⚠️ No se encontraron los archivos CSV en la raíz del repositorio.")
-    st.info("Asegúrate de que los archivos 'Datos para la Base de Datos - Produccion.csv' estén presentes.")
-else:
-    # --- MÉTRICAS ---
-    if "Producción" in datasets:
-        df_p = datasets["Producción"]
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            # Tomar la primera columna numérica que encuentre para el total
-            num_cols = df_p.select_dtypes(include=[np.number]).columns
+    m1, m2 = st.columns(2)
+    with m1:
+        st.dataframe(data_p.head(10), use_container_width=True)
+    with m2:
+        if READY:
+            import plotly.express as px
+            # Intentar gráfico con las primeras dos columnas
+            cols = data_p.columns
+            num_cols = data_p.select_dtypes(include=[np.number]).columns
             if len(num_cols) > 0:
-                val = df_p[num_cols[0]].sum()
-                st.metric("Producción Total", f"{val:,.0f} kg")
-        with m2:
-            st.metric("Registros", len(df_p))
-        with m3:
-            st.metric("Estado", "En Línea")
-
-    st.divider()
-    
-    # --- VISUALIZACIÓN CONDICIONAL ---
-    if PLOTLY_READY:
-        tab1, tab2 = st.tabs(["📊 Gráficos de Producción", "🌡️ Análisis Climático"])
-        
-        with tab1:
-            if "Producción" in datasets:
-                df = datasets["Producción"]
-                cols = df.columns.tolist()
-                # Gráfico simple de barras
-                fig = px.histogram(df, x=cols[0], y=df.select_dtypes(include=[np.number]).columns[0],
-                                 title="Distribución de Producción", color_discrete_sequence=['#2ecc71'])
+                fig = px.bar(data_p, x=cols[0], y=num_cols[0], title="Vista Rápida de Producción")
                 st.plotly_chart(fig, use_container_width=True)
-        
-        with tab2:
-            if "Temperatura" in datasets:
-                df = datasets["Temperatura"]
-                st.line_chart(df.select_dtypes(include=[np.number]))
-    else:
-        st.warning("### 💡 Modo de compatibilidad activado")
-        st.info("Mostrando tablas de datos (Plotly no disponible temporalmente).")
-        for name, df in datasets.items():
-            st.write(f"**Vista previa: {name}**")
-            st.dataframe(df.head(20), use_container_width=True)
+        else:
+            st.info("Gráficos no disponibles (Instalando Plotly...)")
+
+if data_t is not None:
+    st.success(f"✅ Datos de Temperatura cargados: {found_files['Temperatura']}")
+    st.line_chart(data_t.select_dtypes(include=[np.number]))
+
+if not found_files:
+    st.error("❌ No se detectaron archivos que contengan 'Produccion' o 'Temperatura' en el nombre.")
+    st.info("Revisa la lista de archivos en el expansor de arriba para verificar los nombres exactos.")
 
 st.markdown("---")
-st.caption("Sistema de Monitoreo Agrícola | Generado para contingencia de infraestructura")
+st.caption("Herramienta de diagnóstico de despliegue v1.2")
