@@ -1,10 +1,5 @@
 streamlit
 pandas
-numpy
-matplotlib
-seaborn
-kagglehub
-scipy
-statsmodels
-openpyxl
 plotly
+numpy
+
