@@ -1,41 +1,56 @@
-🌊 Dashboard de Análisis Integrador - Cuenca del Río Magdalena
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white  )
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white  )
+![Pandas](https://img.shields.io/badge/Pandas-150458?style=for-the-badge&logo=pandas&logoColor=white  )
+![Plotly](https://img.shields.io/badge/Plotly-3F4F75?style=for-the-badge&logo=plotly&logoColor=white  )
+![Kaggle](https://img.shields.io/badge/Kaggle-20BEFF?style=for-the-badge&logo=Kaggle&logoColor=white  )
 
-📝 Descripción del Proyecto
+🌱 Agro-Clima Intelligence Pro
 
-Esta aplicación es una herramienta de Análisis de Datos de Nivel Integrador diseñada para explorar la dinámica socio-ambiental y geográfica del departamento del Magdalena, Colombia. Utiliza datos científicos obtenidos directamente de Kaggle para proporcionar una visión profunda mediante técnicas de visualización estadística avanzada.
+📋 Descripción del Proyecto
 
-El proyecto está dividido en dos secciones principales:
+Esta plataforma es una herramienta avanzada de Business Intelligence aplicada al sector agrícola y climático. El sistema integra múltiples fuentes de datos para analizar la relación entre las variables meteorológicas y el rendimiento de las cosechas en diferentes municipios de la región.
 
-Landing Page: Una interfaz de bienvenida que contextualiza la importancia del Río Magdalena.
+La aplicación permite la ingesta de datos desde archivos Excel (.xlsx), CSV y bases de datos SQL (SQLite) de manera automática y centralizada, ofreciendo un dashboard interactivo para la toma de decisiones.
 
-Laboratorio de Datos: Un panel de trabajo profesional con herramientas de exploración, estadística descriptiva y análisis multivariado.
+🎯 Objetivos del Análisis
 
-🛠️ Tecnologías Utilizadas
+El proyecto busca responder a preguntas críticas para la planificación agrícola mediante el uso de analítica descriptiva y exploratoria:
 
-Streamlit: Para la creación de la interfaz web interactiva.
+Identificación de Patrones Climáticos: Determinar periodos críticos de precipitación y temperatura que afectan directamente a los cultivos.
 
-Pandas & Numpy: Para el procesamiento y limpieza de estructuras de datos.
+Correlación Clima-Producción: Analizar cómo el brillo solar y la lluvia influyen en el rendimiento por hectárea.
 
-Seaborn & Matplotlib: Para la generación de gráficos estadísticos de alta calidad.
+Optimización Regional: Identificar los municipios con mejor desempeño agrícola bajo condiciones climáticas específicas.
 
-Kagglehub: Para la gestión y descarga automatizada de datasets.
+Mitigación de Riesgos: Proporcionar una base de datos histórica para predecir posibles caídas en la producción ante eventos climáticos adversos.
 
-📊 Análisis Estadísticos Incluidos
+📊 Estructura de la Base de Datos
 
-La aplicación implementa tres pilares fundamentales del análisis de datos:
+El proyecto procesa la información organizada en los siguientes módulos (basados en el archivo Datos Base de Datos.xlsx):
 
-Distribución: Visualización de la dispersión de variables mediante histogramas y curvas KDE.
+🌡️ Temperatura: Análisis de máximas y mínimas diarias (en degC) por región.
 
-Correlación: Matriz de Pearson para identificar relaciones lineales entre variables numéricas.
+🌧️ Precipitación: Monitoreo mensual de lluvias acumuladas (en mm).
 
-Regresión: Gráficos de dispersión con líneas de tendencia para identificar patrones predictivos.
+☀️ Brillo Solar: Registro de horas de sol efectivas diarias.
 
-🚀 Instalación y Uso
+🌾 Producción: Datos críticos de áreas sembradas, áreas cosechadas, producción total y rendimiento por producto.
+
+🚀 Características Principales
+
+Carga Multi-formato: Motor de detección inteligente que busca fuentes en SQL, CSV y hojas de Excel simultáneamente.
+
+Normalización de Datos: Limpieza automática de cabeceras y conversión robusta de tipos numéricos (manejo de separadores de miles y decimales).
+
+Visualización Avanzada: Implementación de gráficos estadísticos con Seaborn y Matplotlib para análisis de densidad y comparativas regionales.
+
+Seguridad y UX: Interfaz con control de sesión, diseño responsivo y navegación por pestañas profesionales.
+
+🛠️ Instalación y Uso
 
 Clonar el repositorio:
 
-git clone [https://github.com/tu-usuario/magdalena-analytics.git](https://github.com/tu-usuario/magdalena-analytics.git)
-cd magdalena-analytics
+git clone [https://github.com/grupoproyectoanalisisdatos-bot/Simulacion_-IA-cosechas_-repo-prueba-streamlit.git](https://github.com/grupoproyectoanalisisdatos-bot/Simulacion_-IA-cosechas_-repo-prueba-streamlit.git)
 
 
 Instalar dependencias:
@@ -45,17 +60,18 @@ pip install -r requirements.txt
 
 Ejecutar la aplicación:
 
-streamlit run app.py
+streamlit run streamlit_app.py
 
 
-📖 Estructura de Archivos
+📦 Dependencias Técnicas
 
-app.py: Código principal de la aplicación (Frontend y Backend).
+Pandas: Manipulación y limpieza de dataframes.
 
-requirements.txt: Lista de librerías necesarias para el entorno.
+Seaborn & Matplotlib: Visualización científica de datos.
 
-README.md: Documentación del proyecto.
+Openpyxl: Librería necesaria para la lectura de archivos Excel (.xlsx).
 
-Nivel del Curso: Integrador Experto
+Sqlite3: Integración de base de datos relacional para persistencia local.
 
-Dataset Original: corzogac/magdalena-colombia-data
+[!IMPORTANT]
+Nota de Configuración: Asegúrese de que el archivo Datos Base de Datos.xlsx o sus equivalentes en .csv se encuentren en la raíz del proyecto para que el motor de carga pueda indexar la información correctamente.
