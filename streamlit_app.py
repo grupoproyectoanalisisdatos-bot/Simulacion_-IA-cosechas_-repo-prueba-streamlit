@@ -57,6 +57,7 @@ st.markdown("""
 # --- CARGA Y PROCESAMIENTO DE DATOS ---
 @st.cache_data
 def load_data():
+    # Diccionario con rutas relativas a la raíz del proyecto
     files = {
         "prod": "Datos para la Base de Datos - Produccion.csv",
         "temp": "Datos para la Base de Datos - Temperatura.csv",
@@ -67,17 +68,30 @@ def load_data():
     data = {}
     for key, path in files.items():
         if os.path.exists(path):
-            df = pd.read_csv(path)
-            # Limpieza básica de columnas
-            df.columns = [c.strip() for c in df.columns]
-            data[key] = df
+            try:
+                df = pd.read_csv(path)
+                # Limpieza de espacios en nombres de columnas para evitar KeyError
+                df.columns = [str(c).strip() for c in df.columns]
+                
+                # Conversión de tipos de datos comunes
+                if 'Fecha' in df.columns:
+                    df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
+                if 'Año' in df.columns:
+                    df['Año'] = pd.to_numeric(df['Año'], errors='coerce')
+                
+                data[key] = df
+            except Exception as e:
+                st.error(f"Error al leer el archivo {path}: {e}")
+        else:
+            data[key] = None
     return data
 
 datasets = load_data()
 
 # --- VALIDACIÓN DE DATOS ---
-if not datasets.get("prod") is not None:
-    st.error("⚠️ No se encontraron los archivos CSV en el directorio raíz.")
+if datasets.get("prod") is None:
+    st.error("⚠️ Error Crítico: No se encontró el archivo de 'Produccion.csv' en el directorio raíz.")
+    st.info("Asegúrate de que los archivos CSV estén en la carpeta principal del repositorio.")
     st.stop()
 
 df_prod = datasets["prod"]
@@ -91,7 +105,11 @@ st.markdown("---")
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2103/2103633.png", width=80)
     st.header("📍 Filtros de Análisis")
-    municipios = sorted(df_prod['Municipio'].unique())
+    
+    # Identificación segura de la columna de municipio
+    col_mun = 'Municipio' if 'Municipio' in df_prod.columns else df_prod.columns[0]
+    municipios = sorted(df_prod[col_mun].dropna().unique())
+    
     mun_sel = st.selectbox("Seleccione Municipio", municipios)
     
     st.divider()
@@ -99,34 +117,41 @@ with st.sidebar:
     st.info("El cruce de coordenadas permite identificar microrregiones con estrés térmico.")
 
 # --- MÉTRICAS DE DESEMPEÑO ---
-data_mun = df_prod[df_prod['Municipio'] == mun_sel]
+data_mun = df_prod[df_prod[col_mun] == mun_sel]
 
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    rend_medio = data_mun['Rendimiento'].mean()
+    rend_medio = data_mun['Rendimiento'].mean() if 'Rendimiento' in data_mun.columns else 0
     st.markdown(f'<div class="metric-card">', unsafe_allow_html=True)
     st.metric("Rendimiento Promedio", f"{rend_medio:.2f} T/Ha")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
-    area_tot = data_mun['Area Sembrada'].sum()
+    area_tot = data_mun['Area Sembrada'].sum() if 'Area Sembrada' in data_mun.columns else 0
     st.markdown(f'<div class="metric-card">', unsafe_allow_html=True)
     st.metric("Área Sembrada", f"{area_tot:,.0f} Ha")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col3:
     # Cálculo de eficiencia (Cosechado / Sembrado)
-    eficiencia = (data_mun['Area Cosechada'].sum() / area_tot * 100) if area_tot > 0 else 0
+    cosecha_col = 'Area Cosechada' if 'Area Cosechada' in data_mun.columns else None
+    if cosecha_col and area_tot > 0:
+        eficiencia = (data_mun[cosecha_col].sum() / area_tot * 100)
+    else:
+        eficiencia = 0
     st.markdown(f'<div class="metric-card">', unsafe_allow_html=True)
     st.metric("Eficiencia de Cosecha", f"{eficiencia:.1f}%")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col4:
-    # Ejemplo de temperatura si existe el dataset
     temp_val = "N/D"
-    if df_temp is not None and 'Municipio:' in df_temp.columns:
-        temp_val = f"{df_temp[df_temp['Municipio:'] == mun_sel]['Valor:'].mean():.1f} °C"
+    if df_temp is not None:
+        col_t_mun = 'Municipio:' if 'Municipio:' in df_temp.columns else 'Municipio'
+        if col_t_mun in df_temp.columns:
+            val = df_temp[df_temp[col_t_mun] == mun_sel]['Valor:'].mean() if 'Valor:' in df_temp.columns else None
+            if val is not None:
+                temp_val = f"{val:.1f} °C"
     st.markdown(f'<div class="metric-card">', unsafe_allow_html=True)
     st.metric("Temp. Promedio", temp_val)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -138,19 +163,19 @@ c_map, c_action = st.columns([2, 1])
 with c_map:
     st.subheader("🗺️ Geo-localización de Lotes")
     if df_temp is not None and 'Latitud:' in df_temp.columns:
-        # Normalización de coordenadas para el mapa de Streamlit
-        # (Ajuste basado en el formato detectado en tus archivos)
-        df_map = df_temp[df_temp['Municipio:'] == mun_sel].copy()
+        df_map = df_temp[df_temp[col_t_mun] == mun_sel].copy()
         
         def normalize_coord(x):
             try:
-                # Convierte el formato "62.983..." a decimal "6.298..."
-                s = str(x).replace(".", "")
+                # Limpieza de formato para asegurar compatibilidad con st.map
+                s = str(x).replace(".", "").replace("-", "")
+                if len(s) < 2: return 0.0
                 return float(s[0] + "." + s[1:6])
             except: return 0.0
 
         df_map['lat'] = df_map['Latitud:'].apply(normalize_coord)
-        df_map['lon'] = df_map['Longitud:'].apply(lambda x: -normalize_coord(abs(x)))
+        # Longitud generalmente negativa para Colombia
+        df_map['lon'] = df_map['Longitud:'].apply(lambda x: -normalize_coord(x))
         
         st.map(df_map[['lat', 'lon']], zoom=10)
     else:
@@ -170,11 +195,16 @@ with c_action:
 # --- GRÁFICO EVOLUTIVO ---
 st.divider()
 st.subheader("📈 Evolución de Rendimiento por Producto")
-fig = px.line(data_mun, x='Año', y='Rendimiento', color='Producto',
-              markers=True, title="Histórico de Rendimiento (T/Ha)",
-              color_discrete_sequence=['#15803d', '#1e3a8a'])
-fig.update_layout(hovermode="x unified")
-st.plotly_chart(fig, use_container_width=True)
+if 'Año' in data_mun.columns and 'Rendimiento' in data_mun.columns:
+    # Agrupar datos para evitar líneas confusas si hay múltiples entradas por año
+    plot_data = data_mun.groupby(['Año', 'Producto'])['Rendimiento'].mean().reset_index()
+    fig = px.line(plot_data, x='Año', y='Rendimiento', color='Producto',
+                  markers=True, title="Histórico de Rendimiento (T/Ha)",
+                  color_discrete_sequence=['#15803d', '#1e3a8a'])
+    fig.update_layout(hovermode="x unified")
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("Datos de 'Año' o 'Producto' no disponibles para graficar tendencias.")
 
 st.markdown("---")
 st.caption("Agro-Clima Intelligence Pro - Sistema de Soporte a Decisiones")
