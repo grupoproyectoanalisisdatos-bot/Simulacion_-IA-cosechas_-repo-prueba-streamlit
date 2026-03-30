@@ -4,113 +4,129 @@ import numpy as np
 import os
 import sys
 import subprocess
+import time
 
-# --- FUNCIÓN DE INSTALACIÓN DINÁMICA (Último recurso) ---
-def try_install(package):
+# --- LOGICA DE INSTALACION FORZADA (Ejecución temprana) ---
+def ensure_dependencies():
+    """Fuerza la instalación y recarga del path si falta plotly."""
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+        import plotly
         return True
-    except:
+    except ImportError:
+        # Intentar instalar usando el ejecutable actual de Python
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "plotly", "pandas", "openpyxl"])
+        # Forzar la actualización del path de búsqueda de módulos
+        import site
+        from importlib import reload
+        reload(site)
         return False
 
-# --- GESTIÓN DE DEPENDENCIAS ---
-PLOTLY_AVAILABLE = False
+# Ejecutar verificación antes de cualquier otra importación de plotly
+PLOTLY_READY = ensure_dependencies()
+
+# Ahora intentamos las importaciones normales
 try:
     import plotly.express as px
     import plotly.graph_objects as go
-    PLOTLY_AVAILABLE = True
+    PLOTLY_READY = True
 except ImportError:
-    # Intentar instalarlo si falla (solo funciona en algunos entornos)
-    if try_install("plotly"):
-        try:
-            import plotly.express as px
-            import plotly.graph_objects as go
-            PLOTLY_AVAILABLE = True
-        except:
-            PLOTLY_AVAILABLE = False
+    PLOTLY_READY = False
 
-# --- CONFIGURACIÓN UI ---
-st.set_page_config(page_title="IA Cosechas - Simulación", layout="wide")
+# --- CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(
+    page_title="IA Cosechas | Simulación Pro",
+    page_icon="🌾",
+    layout="wide"
+)
 
-# --- BARRA LATERAL DE DIAGNÓSTICO ---
+# --- ESTILOS PERSONALIZADOS ---
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+    """, unsafe_allow_stdio=True)
+
+# --- BARRA LATERAL: ESTADO Y SISTEMA ---
 with st.sidebar:
-    st.header("🔍 Diagnóstico")
-    st.write(f"**Plotly cargado:** {'✅' if PLOTLY_AVAILABLE else '❌'}")
-    if st.button("Ver paquetes instalados"):
-        try:
-            import pkg_resources
-            installed_packages = [f"{d.project_name}=={d.version}" for d in pkg_resources.working_set]
-            st.write(sorted(installed_packages))
-        except:
-            st.write("No se pudo obtener la lista de paquetes.")
-
-# --- CARGA DE DATOS ---
-@st.cache_data
-def load_data():
-    # Buscamos archivos comunes reportados en tus logs
-    search_files = [
-        "Datos para la Base de Datos - Produccion.csv",
-        "Datos para la Base de Datos - Produccion.xlsx",
-        "Datos para la Base de Datos - Temperatura.csv",
-        "Datos para la Base de Datos - Temperatura.xlsx"
-    ]
+    st.image("https://img.icons8.com/fluency/96/agriculture.png", width=80)
+    st.title("Panel de Control")
     
-    found_data = {}
-    for f in search_files:
-        if os.path.exists(f):
-            name = "Producción" if "Produccion" in f else "Clima"
+    status_color = "green" if PLOTLY_READY else "red"
+    st.markdown(f"**Motor Gráfico:** :{status_color}[{'Activo' if PLOTLY_READY else 'Inactivo (Modo Tabla)'}]")
+    
+    st.divider()
+    st.subheader("🛠️ Info de Entorno")
+    st.caption(f"Python: {sys.version.split()[0]}")
+    if st.button("🔄 Reiniciar Diagnóstico"):
+        st.cache_data.clear()
+        st.rerun()
+
+# --- CARGA DE DATOS INTELIGENTE ---
+@st.cache_data
+def get_data():
+    files = {
+        "Producción": "Datos para la Base de Datos - Produccion.csv",
+        "Temperatura": "Datos para la Base de Datos - Temperatura.csv"
+    }
+    loaded = {}
+    for key, path in files.items():
+        if os.path.exists(path):
             try:
-                if f.endswith('.csv'):
-                    found_data[name] = pd.read_csv(f)
-                else:
-                    found_data[name] = pd.read_excel(f)
-            except Exception as e:
-                st.error(f"Error al leer {f}: {e}")
-    return found_data
+                loaded[key] = pd.read_csv(path)
+            except:
+                # Fallback por si el CSV tiene codificación extraña o es Excel mal nombrado
+                try: loaded[key] = pd.read_excel(path)
+                except: pass
+    return loaded
 
-# --- VISTA PRINCIPAL ---
-st.title("🌾 Simulación de Cosechas con IA")
+# --- CUERPO PRINCIPAL ---
+st.title("🌾 Análisis de Cosechas con IA")
+st.subheader("Visualización de variables críticas y predicción")
 
-data = load_data()
+datasets = get_data()
 
-if PLOTLY_AVAILABLE:
-    # --- DASHBOARD CON GRÁFICOS ---
-    if data:
-        col1, col2 = st.columns(2)
+if not datasets:
+    st.warning("⚠️ No se encontraron archivos de datos locales. Por favor, verifica que los archivos .csv estén en la raíz del repositorio.")
+    st.info("Buscando: 'Datos para la Base de Datos - Produccion.csv'")
+else:
+    # --- MÉTRICAS RÁPIDAS ---
+    if "Producción" in datasets:
+        df_p = datasets["Producción"]
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            val = df_p.select_dtypes(include=[np.number]).iloc[:,0].sum()
+            st.metric("Producción Total", f"{val:,.0f} kg")
+        with m2:
+            st.metric("Municipios", len(df_p))
+        with m3:
+            st.metric("Estado de Datos", "Sincronizado")
+
+    # --- VISUALIZACIÓN ---
+    st.divider()
+    
+    if PLOTLY_READY:
+        tab1, tab2 = st.tabs(["📊 Gráficos de Producción", "🌡️ Análisis Climático"])
         
-        if "Producción" in data:
-            with col1:
-                st.subheader("Análisis de Producción")
-                df = data["Producción"]
-                # Intentamos usar columnas típicas
-                target_col = df.select_dtypes(include=[np.number]).columns[0]
-                label_col = 'Municipio' if 'Municipio' in df.columns else df.columns[0]
-                fig = px.bar(df, x=label_col, y=target_col, color=target_col, template="plotly_white")
+        with tab1:
+            if "Producción" in datasets:
+                df = datasets["Producción"]
+                cols = df.columns.tolist()
+                fig = px.bar(df, x=cols[0], y=df.select_dtypes(include=[np.number]).columns[0],
+                             title="Rendimiento por Zona", color_discrete_sequence=['#2ecc71'])
                 st.plotly_chart(fig, use_container_width=True)
-                
-        if "Clima" in data:
-            with col2:
-                st.subheader("Variables Climáticas")
-                df = data["Clima"]
-                temp_col = df.select_dtypes(include=[np.number]).columns[0]
-                fig2 = px.line(df, y=temp_col, title="Tendencia Histórica", markers=True)
+        
+        with tab2:
+            if "Temperatura" in datasets:
+                df = datasets["Temperatura"]
+                fig2 = px.line(df, title="Variación Térmica", template="plotly_white")
                 st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.info("Sube archivos de datos (.csv o .xlsx) al repositorio para visualizar el análisis.")
-        st.image("https://images.unsplash.com/photo-1523348837708-15d4a09cfac2?auto=format&fit=crop&q=80&w=1000", caption="Preparado para el análisis")
-
-else:
-    # --- MODO DE EMERGENCIA (SIN PLOTLY) ---
-    st.error("### 🚨 Error de Dependencia")
-    st.warning("La librería `plotly` no está disponible en este servidor.")
-    st.info("Mostrando datos en formato tabla para no interrumpir el trabajo:")
-    
-    if data:
-        for k, v in data.items():
-            st.write(f"**Tabla: {k}**")
-            st.dataframe(v.head(20))
-    else:
-        st.write("No hay datos disponibles para mostrar.")
+        st.error("### 🔌 Error de librerías visuales")
+        st.info("El sistema no pudo cargar Plotly. Mostrando datos crudos:")
+        for name, df in datasets.items():
+            st.write(f"**Datos de {name}:**")
+            st.dataframe(df, use_container_width=True)
 
 st.markdown("---")
-st.caption("Módulo de Análisis v3.0 - Resiliente a errores de librería")
+st.caption("Sistema de Monitoreo Agrícola - v3.5 (Build 2026)")
