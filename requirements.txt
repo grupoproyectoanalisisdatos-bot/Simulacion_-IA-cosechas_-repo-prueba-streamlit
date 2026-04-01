@@ -8,3 +8,5 @@ scipy
 statsmodels
 openpyxl
 plotly
+sqlalchemy
+mysql-connector-python
