@@ -19,18 +19,32 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- FUNCIÓN DE LIMPIEZA DE COLUMNAS (Solución al DuplicateError: 'anio') ---
+# --- FUNCIÓN DE LIMPIEZA DE COLUMNAS Y TIPOS (Solución a DuplicateError y ArrowInvalid) ---
 def clean_dataframe_columns(df):
     """
-    Detecta columnas duplicadas y las renombra (ej. 'anio', 'anio' -> 'anio', 'anio_1')
-    Esto evita el DuplicateError reportado en los logs.
+    1. Detecta y renombra columnas duplicadas.
+    2. Elimina columnas vacías.
+    3. Normaliza tipos de datos para compatibilidad con PyArrow (Streamlit).
     """
+    # Renombrar duplicados
     cols = pd.Series(df.columns)
     for dup in cols[cols.duplicated()].unique(): 
         cols[cols == dup] = [f"{dup}_{i}" if i != 0 else dup for i in range(sum(cols == dup))]
     df.columns = cols
+    
     # Eliminar columnas totalmente vacías
     df = df.dropna(how='all', axis=1)
+    
+    # Convertir columnas de objeto a string o número para evitar errores de tipos mixtos en Arrow
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            # Intentar convertir a numérico si la mayoría son números, si no, dejar como string
+            temp_numeric = pd.to_numeric(df[col], errors='coerce')
+            if temp_numeric.notna().sum() > (len(df) * 0.5):
+                df[col] = temp_numeric
+            else:
+                df[col] = df[col].astype(str).replace('nan', np.nan)
+    
     return df
 
 # --- CARGA DE DATOS RESILIENTE ---
@@ -43,7 +57,7 @@ def load_data():
             dfs = {}
             for sheet in excel_data.sheet_names:
                 raw_df = pd.read_excel(excel_file, sheet_name=sheet)
-                # Aplicar desinfección de columnas inmediatamente
+                # Aplicar desinfección de columnas y tipos inmediatamente
                 dfs[sheet] = clean_dataframe_columns(raw_df)
             return dfs, None
         except Exception as e:
@@ -65,10 +79,9 @@ else:
         st.header("⚙️ Configuración")
         selected_sheet = st.selectbox("Seleccionar Tabla", list(dfs.keys()))
         df = dfs[selected_sheet]
-        st.success(f"Columnas procesadas correctamente.")
+        st.success(f"Datos cargados y normalizados.")
 
     # Identificación de Columnas Especiales
-    # Se identifican para excluirlas de análisis estadísticos pero usarlas en mapas
     geo_cols = [c for c in df.columns if any(x in c.lower() for x in ['latitud', 'longitud', 'lat', 'lon'])]
     num_cols_analysis = [c for c in df.select_dtypes(include=[np.number]).columns.tolist() if c not in geo_cols]
 
@@ -85,53 +98,62 @@ else:
             with col_ctrl2:
                 var_y = st.selectbox("Variable Efecto (Y)", num_cols_analysis, index=len(num_cols_analysis)-1)
 
-            # Gráfico de Dispersión con Regresión
-            fig_rel = px.scatter(
-                df, x=var_x, y=var_y, 
-                trendline="ols", 
-                title=f"Correlación: {var_x} vs {var_y}",
-                template="plotly_white",
-                color_discrete_sequence=["#1e3a8a"]
-            )
-            st.plotly_chart(fig_rel, use_container_width=True)
-            
-            st.info("💡 **Análisis de Experto:** Las coordenadas geográficas han sido excluidas de este análisis correlacional para evitar sesgos, tratándolas exclusivamente como datos de ubicación.")
+            # Limpiar nulos para el gráfico de dispersión
+            plot_df = df.dropna(subset=[var_x, var_y])
+
+            if not plot_df.empty:
+                fig_rel = px.scatter(
+                    plot_df, x=var_x, y=var_y, 
+                    trendline="ols", 
+                    title=f"Correlación: {var_x} vs {var_y}",
+                    template="plotly_white",
+                    color_discrete_sequence=["#1e3a8a"]
+                )
+                st.plotly_chart(fig_rel, use_container_width=True)
+                st.info("💡 **Análisis de Experto:** Las coordenadas se tratan exclusivamente como ubicación y se excluyen de este análisis estadístico.")
+            else:
+                st.warning("No hay suficientes datos válidos (sin nulos) para generar este gráfico.")
         else:
-            st.warning("La tabla seleccionada no tiene suficientes variables numéricas (excluyendo coordenadas) para este análisis.")
+            st.warning("La tabla no tiene suficientes variables numéricas para el análisis estadístico.")
 
     with tab2:
         st.subheader("Visualización Espacial de Datos")
         
-        # Verificar si existen columnas de coordenadas
         lat_col = next((c for c in df.columns if 'lat' in c.lower()), None)
         lon_col = next((c for c in df.columns if 'lon' in c.lower()), None)
         
         if lat_col and lon_col:
-            st.markdown("Uso correcto de coordenadas para georreferenciación:")
             map_var = st.selectbox("Variable a visualizar en mapa", num_cols_analysis)
             
-            # Limpiar datos para el mapa
-            map_df = df.dropna(subset=[lat_col, lon_col, map_var])
+            # Limpiar datos para el mapa: asegurar que lat/lon sean numéricos y no nulos
+            map_df = df.copy()
+            map_df[lat_col] = pd.to_numeric(map_df[lat_col], errors='coerce')
+            map_df[lon_col] = pd.to_numeric(map_df[lon_col], errors='coerce')
+            map_df = map_df.dropna(subset=[lat_col, lon_col, map_var])
             
-            fig_map = px.scatter_mapbox(
-                map_df, lat=lat_col, lon=lon_col, 
-                color=map_var, size=map_var,
-                color_continuous_scale=px.colors.cyclical.IceFire,
-                size_max=15, zoom=6,
-                mapbox_style="carto-positron",
-                title=f"Distribución Geográfica de {map_var}"
-            )
-            fig_map.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
-            st.plotly_chart(fig_map, use_container_width=True)
+            if not map_df.empty:
+                fig_map = px.scatter_mapbox(
+                    map_df, lat=lat_col, lon=lon_col, 
+                    color=map_var, size=map_var,
+                    color_continuous_scale=px.colors.cyclical.IceFire,
+                    size_max=15, zoom=6,
+                    mapbox_style="carto-positron",
+                    title=f"Distribución Geográfica de {map_var}"
+                )
+                fig_map.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
+                st.plotly_chart(fig_map, use_container_width=True)
+            else:
+                st.warning("No hay datos geográficos válidos para mostrar en el mapa.")
         else:
-            st.info("No se detectaron columnas de Latitud/Longitud en esta hoja para generar el mapa.")
+            st.info("No se detectaron columnas de Latitud/Longitud en esta hoja.")
 
     with tab3:
         st.subheader("Diagnóstico de Variabilidad")
         if num_cols_analysis:
             target_var = st.selectbox("Seleccionar Variable para Histograma", num_cols_analysis)
+            clean_hist_df = df.dropna(subset=[target_var])
             fig_hist = px.histogram(
-                df, x=target_var, 
+                clean_hist_df, x=target_var, 
                 marginal="box", 
                 title=f"Distribución y Outliers de {target_var}",
                 color_discrete_sequence=["#15803d"]
@@ -140,7 +162,8 @@ else:
 
     with tab4:
         st.subheader("Explorador de Registros")
+        # Mostramos los datos limpios y convertidos para evitar errores de renderizado
         st.dataframe(df, use_container_width=True)
 
 st.divider()
-st.caption("Fix: Geo-Aware Data Processing Enabled | Plotly Rendering Engine v2.1")
+st.caption("Fix: Robust Type Conversion & Geo-Validation Enabled | Plotly Engine v2.2")
