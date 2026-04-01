@@ -5,11 +5,13 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 import mysql.connector
+import plotly.express as px
+import plotly.graph_objects as go
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="Data Intelligence - Agro Clima",
-    page_icon="🌱",
+    page_title="Data Intelligence - Analítica Avanzada",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -21,18 +23,18 @@ st.markdown("""
     .stApp { background-image: linear-gradient(0deg, #f4f7f9 0%, #ffffff 100%); }
     .landing-card {
         background: white; padding: 2rem; border-radius: 15px;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.05); border-left: 8px solid #1e3a8a;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.05); border-left: 8px solid #0f172a;
     }
-    .main-title { color: #1e3a8a; font-size: 3.5rem; font-weight: 800; margin-bottom: 0px; }
-    .sub-title { color: #64748b; font-size: 1.2rem; margin-bottom: 2rem; }
-    .doc-section { background: #f8fafc; padding: 1.5rem; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 1rem; }
-    .help-box { background-color: #eff6ff; padding: 10px; border-radius: 8px; border-left: 4px solid #3b82f6; font-size: 0.9rem; }
-    [data-testid="stSidebar"] { background-color: #1e293b; color: white; }
-    [data-testid="stSidebar"] * { color: white !important; }
+    .main-title { color: #0f172a; font-size: 3rem; font-weight: 800; margin-bottom: 0px; }
+    .sub-title { color: #475569; font-size: 1.1rem; margin-bottom: 2rem; }
+    .metric-card {
+        background: white; padding: 1.2rem; border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCIÓN DE CONEXIÓN A RAILWAY ---
+# --- FUNCIÓN DE CONEXIÓN A BASE DE DATOS ---
 def get_db_connection():
     try:
         conn = mysql.connector.connect(
@@ -43,22 +45,24 @@ def get_db_connection():
             database=st.secrets["DB_NAME"]
         )
         return conn
-    except Exception as e:
+    except Exception:
         return None
 
-# --- CARGA DE DATOS (HÍBRIDA) ---
+# --- CARGA DE DATOS INTELIGENTE ---
 @st.cache_data(ttl=600)
 def load_data():
     dfs = {}
     conn = get_db_connection()
+    
     if conn:
         try:
-            tables = ["Municipios", "Registros_Clima", "Registros_Produccion"]
+            cursor = conn.cursor()
+            cursor.execute("SHOW TABLES")
+            tables = [t[0] for t in cursor.fetchall()]
             for table in tables:
-                query = f"SELECT * FROM {table}"
-                dfs[table] = pd.read_sql(query, conn)
+                dfs[table] = pd.read_sql(f"SELECT * FROM {table}", conn)
             conn.close()
-            return dfs, None, "Online (Railway SQL)"
+            return dfs, None, "Conexión Activa (Railway SQL)"
         except Exception:
             if conn: conn.close()
     
@@ -66,160 +70,149 @@ def load_data():
     if os.path.exists(excel_file):
         try:
             excel_data = pd.ExcelFile(excel_file)
-            for sheet_name in excel_data.sheet_names:
-                df = pd.read_excel(excel_file, sheet_name=sheet_name)
-                df.columns = [c.replace(':', '').strip() for c in df.columns]
-                # Limpieza robusta de datos numéricos
+            for sheet in excel_data.sheet_names:
+                df = pd.read_excel(excel_file, sheet_name=sheet)
+                df.columns = [str(c).strip() for c in df.columns]
                 for col in df.columns:
-                    if any(x in col.lower() for x in ['valor', 'produccion', 'hectareas', 'temp', 'precip']):
-                        df[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-                dfs[sheet_name] = df
-            return dfs, None, "Local (Excel)"
+                    if df[col].dtype == 'object':
+                        try:
+                            df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='ignore')
+                        except: pass
+                dfs[sheet] = df
+            return dfs, None, "Archivo Local (Excel)"
         except Exception as e:
-            return {}, f"Error al procesar el Excel: {e}", "Ninguna"
-    return {}, "No se encontró fuente de datos.", "Ninguna"
+            return {}, f"Error al leer Excel: {e}", "Error"
+            
+    return {}, "No se detectaron fuentes de datos.", "Sin datos"
 
-# --- LÓGICA DE SESIÓN ---
-if 'auth' not in st.session_state:
-    st.session_state.auth = False
+# --- LÓGICA DE NAVEGACIÓN ---
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
 
-def enter_dashboard():
-    st.session_state.auth = True
-
-# --- INICIO DE RENDERIZADO ---
 dfs, error_msg, data_source = load_data()
 
-if not st.session_state.auth:
-    # --- LANDING PAGE ---
-    col1, col2 = st.columns([1.2, 0.8])
+if not st.session_state.authenticated:
+    col1, col2 = st.columns([1, 1])
     with col1:
-        st.markdown('<h1 class="main-title">Expert Data <br>Analytics</h1>', unsafe_allow_html=True)
-        st.markdown(f'<p class="sub-title">Inteligencia Agrícola Basada en Evidencia | <b>{data_source}</b></p>', unsafe_allow_html=True)
+        st.markdown('<h1 class="main-title">Data Analytics<br>Expert Suite</h1>', unsafe_allow_html=True)
+        st.markdown(f'<p class="sub-title">Infraestructura conectada a: <b>{data_source}</b></p>', unsafe_allow_html=True)
         st.markdown("""
             <div class="landing-card">
-                <h3>Capacidades del Sistema</h3>
-                <p>Análisis estadístico avanzado de la cuenca del Magdalena y sectores productivos.</p>
-                <ul>
-                    <li>Modelado de correlación de variables (Seaborn)</li>
-                    <li>Detección de anomalías climáticas</li>
-                    <li>Ranking de eficiencia municipal</li>
-                </ul>
+                <h4>Validación Geográfica y Productiva</h4>
+                <p>Módulo de Inteligencia de Negocios basado en analítica predictiva y diagnóstico de brechas agrícolas.</p>
             </div>
-            """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
         st.write("")
-        st.button("🚀 Acceder al Laboratorio de Datos", on_click=enter_dashboard, type="primary", use_container_width=True)
+        if st.button("Iniciar Exploración de Datos", type="primary", use_container_width=True):
+            st.session_state.authenticated = True
+            st.rerun()
     with col2:
-        st.image("https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&q=80&w=800", use_container_width=True)
+        st.image("https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=800", use_container_width=True)
 
 else:
-    # --- PANEL DASHBOARD ---
     with st.sidebar:
-        st.image("https://cdn-icons-png.flaticon.com/512/1541/1541400.png", width=80)
-        st.title("Data Expert")
-        options = list(dfs.keys())
-        dataset_name = st.selectbox("Dataset de Análisis", options)
+        st.title("🎛️ Control de Datos")
+        if dfs:
+            selected_table = st.selectbox("Tabla Activa", list(dfs.keys()))
+            df = dfs[selected_table].copy()
+        else:
+            st.error("Sin tablas.")
+            df = None
+            
         st.divider()
-        if st.button("⬅ Salir"):
-            st.session_state.auth = False
+        if st.button("Cerrar Sesión"):
+            st.session_state.authenticated = False
             st.rerun()
 
-    df = dfs.get(dataset_name)
-    
     if df is not None:
-        tab_viz, tab_data, tab_doc = st.tabs(["📊 Análisis Estadístico", "🗂️ Explorador", "📖 Metodología"])
+        df = df.dropna(how='all', axis=0)
+        
+        tab_geo, tab_viz, tab_data = st.tabs(["🗺️ Georreferenciación", "📈 Diagnóstico Avanzado", "🗂️ Datos Crudos"])
+
+        with tab_geo:
+            st.subheader("Ubicación de Puntos de Producción")
+            lat_col = next((c for c in df.columns if 'lat' in c.lower()), None)
+            lon_col = next((c for c in df.columns if 'lon' in c.lower()), None)
+            
+            if lat_col and lon_col:
+                map_df = df.dropna(subset=[lat_col, lon_col]).copy()
+                map_df[lat_col] = pd.to_numeric(map_df[lat_col], errors='coerce')
+                map_df[lon_col] = pd.to_numeric(map_df[lon_col], errors='coerce')
+                map_df = map_df.dropna(subset=[lat_col, lon_col])
+
+                if not map_df.empty:
+                    fig_map = px.scatter_mapbox(
+                        map_df, lat=lat_col, lon=lon_col, 
+                        hover_name=df.columns[0] if not df.empty else None,
+                        color_discrete_sequence=["#1e3a8a"],
+                        zoom=5, height=500,
+                        mapbox_style="carto-positron"
+                    )
+                    fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+                    st.plotly_chart(fig_map, use_container_width=True)
+            else:
+                st.warning("La tabla actual no contiene coordenadas geográficas.")
 
         with tab_viz:
-            st.subheader(f"Insights Críticos: {dataset_name}")
+            st.subheader("🚀 Análisis Comparativo y Relaciones Críticas")
             
-            # --- KPIS INICIALES ---
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Muestra (N)", f"{len(df):,}")
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            mun_col = next((c for c in df.columns if 'municipio' in c.lower() or 'nombre' in c.lower()), None)
+            num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
             
-            if mun_col: m2.metric("Entidades", len(df[mun_col].unique()))
-            if numeric_cols:
-                m3.metric("Promedio Gral", f"{df[numeric_cols[0]].mean():.2f}")
-                m4.metric("Desv. Estándar", f"{df[numeric_cols[0]].std():.2f}")
+            if len(num_cols) >= 2:
+                # KPIs Superiores
+                kpi1, kpi2, kpi3 = st.columns(3)
+                main_var = num_cols[-1]
+                kpi1.metric(f"Promedio {main_var}", f"{df[main_var].mean():.2f}")
+                kpi2.metric("Eficiencia Max.", f"{df[main_var].max():.2f}")
+                kpi3.metric("Nivel de Dispersión", f"{df[main_var].std():.2f}")
 
-            st.divider()
+                st.divider()
 
-            # --- GRÁFICO 1: DISTRIBUCIÓN Y DENSIDAD ---
-            col_g1, col_t1 = st.columns([2, 1])
-            with col_g1:
-                st.markdown("#### 1. Distribución y Probabilidad")
-                var_dist = st.selectbox("Seleccione Variable de Interés", numeric_cols, key="dist")
-                fig1, ax1 = plt.subplots(figsize=(10, 5))
-                sns.histplot(df[var_dist].dropna(), kde=True, color="#1e3a8a", palette="mako", ax=ax1)
-                ax1.set_title(f"Densidad de {var_dist}", fontsize=12)
-                st.pyplot(fig1)
-            with col_t1:
-                st.info("💡 **Ayuda**: Este gráfico muestra la frecuencia de los valores. La línea curva (KDE) indica dónde se concentra la mayor probabilidad de los datos.")
-                st.markdown(f"""
-                **Análisis Experto:**
-                - **Asimetría:** {'Positiva' if df[var_dist].skew() > 0 else 'Negativa'}
-                - **Outliers:** Se detectan {len(df[df[var_dist] > df[var_dist].mean() + 2*df[var_dist].std()])} valores atípicos.
-                """)
+                col_left, col_right = st.columns(2)
 
-            st.divider()
+                with col_left:
+                    st.markdown("#### 🔍 Relación Causa-Efecto")
+                    var_x = st.selectbox("Factor (X)", num_cols[:-1], index=0)
+                    var_y = st.selectbox("Resultado (Y)", num_cols, index=len(num_cols)-1)
+                    
+                    fig_reg = px.scatter(df, x=var_x, y=var_y, trendline="ols", 
+                                        color_discrete_sequence=["#15803d"],
+                                        title=f"Impacto de {var_x} en {var_y}")
+                    st.plotly_chart(fig_reg, use_container_width=True)
+                    st.info("La línea de tendencia indica si la relación es positiva o negativa. Útil para predecir rendimientos basados en clima.")
 
-            # --- GRÁFICO 2: RELACIÓN Y TENDENCIA ---
-            if len(numeric_cols) >= 2:
-                col_g2, col_t2 = st.columns([2, 1])
-                with col_g2:
-                    st.markdown("#### 2. Regresión Lineal y Correlación")
-                    vx = st.selectbox("Variable X (Causa)", numeric_cols, index=0)
-                    vy = st.selectbox("Variable Y (Efecto)", numeric_cols, index=min(1, len(numeric_cols)-1))
-                    fig2, ax2 = plt.subplots(figsize=(10, 6))
-                    sns.regplot(data=df, x=vx, y=vy, scatter_kws={'alpha':0.5, 'color':'#1e3a8a'}, line_kws={'color':'#ef4444'}, ax=ax2)
-                    st.pyplot(fig2)
-                with col_t2:
-                    st.help("La línea roja representa la tendencia central. Si los puntos están cerca de la línea, existe una fuerte relación predictiva entre las variables.")
-                    corr_val = df[[vx, vy]].corr().iloc[0,1]
-                    st.metric("Coef. Correlación", f"{corr_val:.2f}")
-                    st.write("**Decisión:** " + ("Fuerte relación detectada. Use X para predecir Y." if abs(corr_val) > 0.6 else "Relación débil. Busque otras variables influyentes."))
+                with col_right:
+                    st.markdown("#### 📊 Distribución de Rendimiento")
+                    fig_box = px.box(df, y=var_y, points="all", 
+                                   color_discrete_sequence=["#1e3a8a"],
+                                   title=f"Variabilidad de {var_y} entre Municipios")
+                    st.plotly_chart(fig_box, use_container_width=True)
+                    st.info("Los puntos fuera de la caja son 'Outliers'. Municipios con rendimientos excepcionales o críticas caídas de producción.")
 
-            st.divider()
+                st.divider()
+                
+                st.markdown("#### 🏗️ Análisis de Brecha de Cosecha")
+                # Intentar detectar columnas de área sembrada vs cosechada
+                sem_col = next((c for c in df.columns if 'sembra' in c.lower()), None)
+                cos_col = next((c for c in df.columns if 'cosecha' in c.lower()), None)
+                
+                if sem_col and cos_col:
+                    fig_gap = go.Figure()
+                    fig_gap.add_trace(go.Bar(x=df.index, y=df[sem_col], name='Área Sembrada', marker_color='#94a3b8'))
+                    fig_gap.add_trace(go.Bar(x=df.index, y=df[cos_col], name='Área Cosechada', marker_color='#22c55e'))
+                    fig_gap.update_layout(barmode='group', title="Brecha entre Siembra y Cosecha (Eficiencia Operativa)")
+                    st.plotly_chart(fig_gap, use_container_width=True)
+                else:
+                    st.markdown("#### 🧪 Matriz de Interacción")
+                    fig_heat = plt.figure(figsize=(10, 5))
+                    sns.heatmap(df[num_cols].corr(), annot=True, cmap='RdYlGn', center=0)
+                    st.pyplot(fig_heat)
 
-            # --- GRÁFICO 3: COMPARATIVA REGIONAL (HEATMAP) ---
-            if mun_col and len(numeric_cols) > 1:
-                st.markdown("#### 3. Mapa de Calor: Desempeño por Municipio")
-                col_g3, col_t3 = st.columns([2, 1])
-                with col_g3:
-                    # Top 10 municipios para no saturar el heatmap
-                    pivot_df = df.groupby(mun_col)[numeric_cols].mean().sort_values(by=numeric_cols[0], ascending=False).head(10)
-                    # Normalización simple para visualización
-                    pivot_norm = (pivot_df - pivot_df.min()) / (pivot_df.max() - pivot_df.min())
-                    fig3, ax3 = plt.subplots(figsize=(10, 8))
-                    sns.heatmap(pivot_norm, annot=pivot_df, fmt=".1f", cmap="YlGnBu", ax=ax3)
-                    st.pyplot(fig3)
-                with col_t3:
-                    st.info("🕵️ **Exploración**: Los colores oscuros indican valores máximos normalizados. Útil para identificar qué municipio destaca en múltiples métricas a la vez.")
-                    st.write("**Top Líder:** " + str(pivot_df.index[0]))
+            else:
+                st.warning("Se necesitan al menos 2 columnas numéricas para realizar un análisis de relaciones.")
 
         with tab_data:
-            st.subheader("Acceso a Microdatos")
+            st.markdown("### Tabla de Datos Normalizada")
             st.dataframe(df, use_container_width=True)
-            st.download_button("📥 Exportar para Auditoría (CSV)", df.to_csv(index=False), f"audit_{dataset_name}.csv")
 
-        with tab_doc:
-            st.markdown(f"""
-            <div class="doc-section">
-                <h3>📖 Documentación de Consultas y Lógica</h3>
-                <p><b>Origen de Datos:</b> {data_source}</p>
-                <hr>
-                <h4>Metodología de Análisis:</h4>
-                <ol>
-                    <li><b>Limpieza (Data Wrangling):</b> Conversión de tipos de datos, manejo de comas decimales y normalización de nombres de columnas.</li>
-                    <li><b>Consultas SQL Sugeridas:</b>
-                        <ul>
-                            <li><code>SELECT municipio, AVG(valor) FROM tabla GROUP BY municipio</code>: Para tendencias regionales.</li>
-                            <li><code>SELECT * FROM clima WHERE precip > 200</code>: Identificación de eventos de inundación.</li>
-                        </ul>
-                    </li>
-                    <li><b>Modelado:</b> Se utiliza el Coeficiente de Pearson para validar la relación entre el Clima y la Producción.</li>
-                </ol>
-            </div>
-            """, unsafe_allow_html=True)
-
-st.caption("Agro-Clima Intelligence Expert System © 2024")
+st.caption("Expert Analytics Suite v3.0 | Relaciones Multivariable Verificadas")
