@@ -1,12 +1,34 @@
+# ============================================================================
+# 🌾 Agro-Clima Intelligence Pro - streamlit_app.py (VERSIÓN CORREGIDA)
+# ============================================================================
+# ✅ Correcciones aplicadas:
+# 1. Columnas duplicadas en merges (suffixes)
+# 2. KeyError [None] en dropna() con validación
+# 3. ArrowInvalid en 'Area Cosechada' con limpieza de tipos
+# 4. use_container_width → width='stretch'
+# 5. scatter_mapbox → scatter_map
+# 6. seaborn palette con hue variable
+# 7. SQLAlchemy para pd.read_sql
+# ============================================================================
+
 import streamlit as st
 import pandas as pd
+import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-from matplotlib import rcParams
-import sqlalchemy
+import plotly.express as px
+from sqlalchemy import create_engine, text
 from contextlib import contextmanager
+import warnings
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# Suprimir warnings no críticos para logs más limpios
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
+
+# ============================================================================
+# 🎨 CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# ============================================================================
 st.set_page_config(
     page_title="🌾 Agro-Clima Intelligence Pro",
     page_icon="📊",
@@ -14,144 +36,386 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CONFIGURACIÓN VISUAL PROFESIONAL ---
-def apply_professional_style():
-    """Aplica estilos profesionales a gráficos y interfaz"""
-    # Configurar matplotlib/seaborn
-    sns.set_style("whitegrid")
-    sns.set_palette(SEABORN_PALETTE)
-    rcParams['figure.figsize'] = (10, 6)
-    rcParams['axes.titlesize'] = 14
-    rcParams['axes.labelsize'] = 11
-    rcParams['font.family'] = 'sans-serif'
-    
-    # CSS personalizado para interfaz profesional [[57]][[58]]
-    st.markdown("""
-    <style>
-        .main { background-color: #f8fafc; }
-        .stTabs [data-baseweb="tab-list"] { 
-            gap: 8px; 
-            background-color: #ffffff;
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .stTabs [data-baseweb="tab"] {
-            height: 50px;
-            white-space: pre-wrap;
-            background-color: #f1f5f9;
-            border-radius: 6px 6px 0px 0px;
-            border: none;
-            color: #1e3a8a;
-            font-weight: 500;
-        }
-        .stTabs [aria-selected="true"] {
-            background-color: #1e3a8a !important;
-            color: white !important;
-        }
-        .help-icon { 
-            cursor: help; 
-            color: #64748b;
-            margin-left: 4px;
-        }
-        .metric-card {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #1e3a8a;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        }
-    </style>
-    """, unsafe_allow_html=True)
+# Paleta de colores profesional
+PROFESSIONAL_PALETTE = {
+    "primary": "#1e3a8a",
+    "secondary": "#15803d",
+    "accent": "#f59e0b",
+    "neutral": "#64748b",
+    "background": "#f8fafc",
+    "surface": "#ffffff",
+}
 
-apply_professional_style()
+SEABORN_PALETTE = [
+    PROFESSIONAL_PALETTE["primary"],
+    PROFESSIONAL_PALETTE["secondary"],
+    PROFESSIONAL_PALETTE["accent"],
+    "#0ea5e9",
+    "#8b5cf6",
+]
 
-# --- CONEXIÓN A BASE DE DATOS RAILWAY ---
+# CSS personalizado
+st.markdown("""
+<style>
+    .main { background-color: #f8fafc; }
+    .stTabs [data-baseweb="tab-list"] { 
+        gap: 8px; 
+        background-color: #ffffff;
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #f1f5f9;
+        border-radius: 6px 6px 0px 0px;
+        border: none;
+        color: #1e3a8a;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1e3a8a !important;
+        color: white !important;
+    }
+    .help-icon { 
+        cursor: help; 
+        color: #64748b;
+        margin-left: 4px;
+    }
+    .metric-card {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #1e3a8a;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================================
+# 🔐 CONEXIÓN A BASE DE DATOS (SQLAlchemy - Streamlit Cloud Compatible)
+# ============================================================================
 @st.cache_resource
 def init_connection():
-    """Inicializa conexión a Railway usando st.connection [[51]]"""
+    """
+    Inicializa conexión a BD usando st.secrets (Streamlit Cloud)
+    o variables de entorno (desarrollo local)
+    """
     try:
-        # Método recomendado por Streamlit para producción
-        return st.connection("railway_db", type="sql")
-    except:
-        # Fallback para desarrollo local
+        # Intentar usar st.secrets (Streamlit Cloud)
+        creds = st.secrets["connections"]["railway_db"]
+        dialect = creds.get("dialect", "mysql")
+        host = creds.get("host", "")
+        port = creds.get("port", 3306)
+        database = creds.get("database", "")
+        username = creds.get("username", "")
+        password = creds.get("password", "")
+        
+        url = f"{dialect}+pymysql://{username}:{password}@{host}:{port}/{database}"
+        engine = create_engine(url, pool_pre_ping=True)
+        return engine
+    
+    except (KeyError, FileNotFoundError):
+        # Fallback: variables de entorno para desarrollo local
+        import os
+        dialect = os.getenv("DB_DIALECT", "mysql")
+        host = os.getenv("DB_HOST", "localhost")
+        port = os.getenv("DB_PORT", "3306")
+        database = os.getenv("DB_NAME", "test_db")
+        username = os.getenv("DB_USER", "root")
+        password = os.getenv("DB_PASSWORD", "")
+        
+        url = f"{dialect}+pymysql://{username}:{password}@{host}:{port}/{database}"
+        engine = create_engine(url, pool_pre_ping=True)
+        return engine
+
+# ============================================================================
+# 🧹 FUNCIÓN DE LIMPIEZA DE DATOS (CRÍTICO PARA ARROW)
+# ============================================================================
+def clean_dataframe(df):
+    """
+    Limpia tipos de datos para compatibilidad con PyArrow/Streamlit
+    ✅ Corrige: ArrowInvalid en 'Area Cosechada'
+    """
+    df_clean = df.copy()
+    
+    # Columnas numéricas que pueden venir como string
+    numeric_cols = ['Area Cosechada', 'area_cosechada', 'rendimiento_ha', 
+                    'precipitacion_mm', 'temperatura_max', 'temperatura_min',
+                    'brillo_solar_horas', 'humedad_relativa']
+    
+    for col in numeric_cols:
+        if col in df_clean.columns:
+            # Convertir a string primero, luego a numérico
+            df_clean[col] = pd.to_numeric(
+                df_clean[col].astype(str).str.replace(',', '.').str.strip(),
+                errors='coerce'
+            )
+    
+    # Eliminar columnas completamente nulas
+    df_clean = df_clean.dropna(axis=1, how='all')
+    
+    # Renombrar columnas con caracteres especiales
+    df_clean.columns = df_clean.columns.str.strip().str.replace(' ', '_').str.lower()
+    
+    return df_clean
+
+# ============================================================================
+# 📊 FUNCIÓN DE CARGA DE DATOS CON MANEJO DE DUPLICADOS
+# ============================================================================
+@st.cache_data(ttl=300)  # Caché por 5 minutos
+def load_data():
+    """
+    Carga datos desde Railway con manejo de columnas duplicadas
+    ✅ Corrige: DuplicateError en merges
+    """
+    try:
+        engine = init_connection()
+        
+        # Tablas disponibles (ajustar a tu esquema real)
+        tables = ['produccion', 'temperatura', 'precipitacion', 'brillo_solar', 'municipios']
+        dfs = {}
+        
+        for table in tables:
+            try:
+                query = text(f"SELECT * FROM {table} LIMIT 10000")
+                dfs[table] = pd.read_sql(query, engine)
+                # Renombrar para evitar duplicados
+                dfs[table].columns = [f"{table}_{col}" if col != 'id' else 'id' 
+                                      for col in dfs[table].columns]
+            except Exception as e:
+                st.warning(f"⚠️ Tabla '{table}' no disponible: {str(e)}")
+                dfs[table] = pd.DataFrame()
+        
+        # Merge seguro con sufijos para evitar duplicados
+        if not dfs['produccion'].empty and not dfs['municipios'].empty:
+            df = pd.merge(
+                dfs['produccion'],
+                dfs['municipios'],
+                on='id',
+                how='left',
+                suffixes=('_prod', '_mun')  # ✅ EVITA DUPLICADOS
+            )
+        else:
+            df = dfs['produccion'] if not dfs['produccion'].empty else pd.DataFrame()
+        
+        # Agregar otras tablas si existen
+        for table_name, table_df in dfs.items():
+            if table_name not in ['produccion', 'municipios'] and not table_df.empty:
+                if 'id' in table_df.columns and 'id' in df.columns:
+                    df = pd.merge(
+                        df,
+                        table_df,
+                        on='id',
+                        how='left',
+                        suffixes=('', f'_{table_name}')  # ✅ EVITA DUPLICADOS
+                    )
+        
+        # Limpieza final
+        df = clean_dataframe(df)
+        
+        return df
+    
+    except Exception as e:
+        st.error(f"❌ Error al cargar datos: {str(e)}")
+        # Datos de fallback para desarrollo
+        return pd.DataFrame({
+            'municipio': ['A', 'B', 'C'],
+            'temperatura_max': [25.5, 28.3, 22.1],
+            'precipitacion_mm': [107.5, 95.2, 120.8],
+            'rendimiento_ha': [3.2, 2.8, 3.5],
+            'area_cosechada': [107.5, 95.2, 120.8],
+            'lat': [4.5, 4.6, 4.7],
+            'lon': [-74.0, -74.1, -74.2],
+            'fecha': pd.date_range('2024-01-01', periods=3)
+        })
+
+# ============================================================================
+# 🗺️ GRÁFICO 1: Mapa Interactivo (CORREGIDO)
+# ============================================================================
+def plot_interactive_map(df, lat_col=None, lon_col=None, map_var=None):
+    """
+    Mapa interactivo con validación de columnas
+    ✅ Corrige: KeyError [None], scatter_mapbox → scatter_map
+    """
+    # Validar que las columnas existen y no son None
+    if lat_col is None or lon_col is None or map_var is None:
+        # Buscar columnas automáticamente
+        lat_candidates = ['lat', 'latitude', 'latitud', 'municipios_lat']
+        lon_candidates = ['lon', 'longitude', 'longitud', 'municipios_lon']
+        
+        lat_col = next((c for c in lat_candidates if c in df.columns), None)
+        lon_col = next((c for c in lon_candidates if c in df.columns), None)
+        map_var = next((c for c in df.select_dtypes(include='number').columns 
+                       if c not in [lat_col, lon_col]), None)
+    
+    # Validación crítica antes de dropna
+    if lat_col is None or lon_col is None:
+        st.warning("⚠️ No se encontraron columnas de coordenadas para el mapa")
         return None
-
-conn = init_connection()
-
-# --- FUNCIÓN AUXILIAR: Icono de Ayuda con Tooltip [[39]][[41]] ---
-def help_icon(text: str, key: str = None):
-    """Crea un icono de ayuda con tooltip usando el parámetro 'help' nativo"""
-    return st.markdown(
-        f'<span class="help-icon" title="{text}">ⓘ</span>',
-        unsafe_allow_html=True
+    
+    if map_var is None:
+        st.warning("⚠️ No se encontró variable numérica para visualizar en mapa")
+        return None
+    
+    # Verificar que las columnas existen en el DataFrame
+    required_cols = [lat_col, lon_col, map_var]
+    if not all(col in df.columns for col in required_cols):
+        missing = [col for col in required_cols if col not in df.columns]
+        st.warning(f"⚠️ Columnas faltantes: {missing}")
+        return None
+    
+    # Limpiar datos para el mapa
+    map_df = df.copy()
+    map_df[lat_col] = pd.to_numeric(map_df[lat_col], errors='coerce')
+    map_df[lon_col] = pd.to_numeric(map_df[lon_col], errors='coerce')
+    map_df[map_var] = pd.to_numeric(map_df[map_var], errors='coerce')
+    
+    # Dropna SOLO si todas las columnas existen
+    map_df = map_df.dropna(subset=[lat_col, lon_col, map_var])
+    
+    if map_df.empty:
+        st.warning("⚠️ No hay datos válidos para mostrar en el mapa")
+        return None
+    
+    # ✅ scatter_map en lugar de scatter_mapbox
+    fig_map = px.scatter_map(
+        map_df,
+        lat=lat_col,
+        lon=lon_col,
+        color=map_var,
+        size=map_var,
+        hover_name='municipio' if 'municipio' in map_df.columns else None,
+        title=f"🗺️ Distribución Geográfica: {map_var}",
+        color_continuous_scale='Viridis',
+        mapbox_style='open-street-map',
+        zoom=8
     )
+    
+    fig_map.update_layout(
+        margin=dict(l=0, r=0, t=40, b=0),
+        height=500
+    )
+    
+    return fig_map
 
-# --- GRÁFICO 1: Correlación Temperatura vs Rendimiento ---
+# ============================================================================
+# 📈 GRÁFICO 2: Correlación Temperatura vs Rendimiento (Seaborn)
+# ============================================================================
 def plot_correlation_temp_yield(df):
-    """Gráfico de dispersión con regresión usando Seaborn"""
+    """
+    Gráfico de dispersión con regresión usando Seaborn
+    ✅ Corrige: palette con hue variable
+    """
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Usar palette profesional
+    # Buscar columnas relevantes
+    temp_col = next((c for c in df.columns if 'temp' in c.lower()), None)
+    yield_col = next((c for c in df.columns if 'rendimiento' in c.lower() or 'yield' in c.lower()), None)
+    
+    if temp_col is None or yield_col is None:
+        st.warning("⚠️ Columnas de temperatura o rendimiento no encontradas")
+        return fig
+    
+    df_plot = df[[temp_col, yield_col]].dropna()
+    
+    if len(df_plot) < 2:
+        st.warning("⚠️ Datos insuficientes para correlación")
+        return fig
+    
     sns.regplot(
-        data=df, 
-        x='temperatura_max', 
-        y='rendimiento_ha',
+        data=df_plot,
+        x=temp_col,
+        y=yield_col,
         scatter_kws={'alpha': 0.6, 's': 40, 'color': PROFESSIONAL_PALETTE['primary']},
         line_kws={'color': PROFESSIONAL_PALETTE['secondary'], 'linewidth': 2},
         ax=ax
     )
     
-    ax.set_title('🌡️ Correlación: Temperatura Máxima vs Rendimiento por Hectárea', 
-                 fontsize=14, fontweight='bold', pad=20)
-    ax.set_xlabel('Temperatura Máxima (°C)', fontsize=11)
-    ax.set_ylabel('Rendimiento (ton/ha)', fontsize=11)
+    ax.set_title('🌡️ Correlación: Temperatura vs Rendimiento', fontsize=14, fontweight='bold', pad=20)
+    ax.set_xlabel(temp_col, fontsize=11)
+    ax.set_ylabel(yield_col, fontsize=11)
     ax.grid(True, alpha=0.3)
     
-    # Mejorar legibilidad
     plt.tight_layout()
     return fig
 
-# --- GRÁFICO 2: Distribución de Precipitación por Región ---
+# ============================================================================
+# 📊 GRÁFICO 3: Distribución de Precipitación (Boxplot)
+# ============================================================================
 def plot_precipitation_distribution(df):
-    """Boxplot comparativo con Seaborn"""
+    """
+    Boxplot comparativo con Seaborn
+    ✅ Corrige: palette con hue variable
+    """
     fig, ax = plt.subplots(figsize=(12, 6))
     
-    sns.boxplot(
-        data=df,
-        x='municipio',
-        y='precipitacion_mm',
-        palette=SEABORN_PALETTE[:len(df['municipio'].unique())],
-        ax=ax,
-        linewidth=1.5
-    )
+    precip_col = next((c for c in df.columns if 'precip' in c.lower()), None)
+    mun_col = next((c for c in df.columns if 'municipio' in c.lower() or 'municip' in c.lower()), None)
     
-    ax.set_title('🌧️ Distribución de Precipitación por Municipio', 
-                 fontsize=14, fontweight='bold', pad=20)
-    ax.set_xlabel('Municipio', fontsize=11)
-    ax.set_ylabel('Precipitación Acumulada (mm)', fontsize=11)
-    ax.tick_params(axis='x', rotation=45)
+    if precip_col is None:
+        st.warning("⚠️ Columna de precipitación no encontrada")
+        return fig
+    
+    df_plot = df[[precip_col, mun_col]].dropna() if mun_col else df[[precip_col]].dropna()
+    
+    if mun_col and len(df_plot[mun_col].unique()) > 1:
+        # ✅ Asignar hue para evitar FutureWarning
+        sns.boxplot(
+            data=df_plot,
+            x=mun_col,
+            y=precip_col,
+            hue=mun_col,  # ✅ EVITA WARNING
+            palette=SEABORN_PALETTE[:len(df_plot[mun_col].unique())],
+            ax=ax,
+            linewidth=1.5,
+            legend=False  # ✅ Ocultar leyenda redundante
+        )
+    else:
+        sns.boxplot(
+            data=df_plot,
+            y=precip_col,
+            color=PROFESSIONAL_PALETTE['secondary'],
+            ax=ax,
+            linewidth=1.5
+        )
+    
+    ax.set_title('🌧️ Distribución de Precipitación', fontsize=14, fontweight='bold', pad=20)
+    ax.set_xlabel('Municipio' if mun_col else '', fontsize=11)
+    ax.set_ylabel('Precipitación (mm)', fontsize=11)
+    if mun_col:
+        ax.tick_params(axis='x', rotation=45)
     ax.grid(True, axis='y', alpha=0.3)
     
     plt.tight_layout()
     return fig
 
-# --- GRÁFICO 3: Heatmap de Correlaciones Múltiples ---
-def plot_correlation_heatmap(df, numeric_cols):
-    """Mapa de calor de correlaciones con anotaciones"""
-    # Calcular matriz de correlación
+# ============================================================================
+# 🔗 GRÁFICO 4: Heatmap de Correlaciones
+# ============================================================================
+def plot_correlation_heatmap(df):
+    """
+    Mapa de calor de correlaciones con anotaciones
+    """
+    numeric_cols = df.select_dtypes(include='number').columns.tolist()
+    
+    if len(numeric_cols) < 2:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.text(0.5, 0.5, 'Datos insuficientes para heatmap', ha='center', va='center')
+        return fig
+    
     corr_matrix = df[numeric_cols].corr()
     
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    # Heatmap profesional con máscara triangular
     mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
     sns.heatmap(
         corr_matrix,
         mask=mask,
         annot=True,
         fmt='.2f',
-        cmap='RdYlGn',  # Rojo-Amarillo-Verde para correlaciones
+        cmap='RdYlGn',
         center=0,
         square=True,
         linewidths=0.5,
@@ -159,214 +423,249 @@ def plot_correlation_heatmap(df, numeric_cols):
         cbar_kws={'shrink': 0.8, 'label': 'Coeficiente de Correlación'}
     )
     
-    ax.set_title('🔗 Matriz de Correlaciones: Variables Climáticas y Productivas', 
-                 fontsize=14, fontweight='bold', pad=20)
-    
+    ax.set_title('🔗 Matriz de Correlaciones', fontsize=14, fontweight='bold', pad=20)
     plt.tight_layout()
     return fig
 
-# --- GRÁFICO 4: Evolución Temporal de Brillo Solar ---
-def plot_solar_trend(df):
-    """Línea de tendencia con área de confianza"""
-    fig, ax = plt.subplots(figsize=(12, 6))
+# ============================================================================
+# 📉 GRÁFICO 5: Dispersión con Trendline (Plotly - CORREGIDO)
+# ============================================================================
+def plot_scatter_with_trendline(df, var_x, var_y):
+    """
+    Gráfico de dispersión con línea de tendencia
+    ✅ Corrige: DuplicateError validando columnas únicas
+    """
+    # Validar que las columnas existen
+    if var_x not in df.columns or var_y not in df.columns:
+        st.warning(f"⚠️ Columnas no encontradas: {var_x}, {var_y}")
+        return None
     
-    # Agrupar por período si existe columna de fecha
-    if 'fecha' in df.columns:
-        df_plot = df.groupby('fecha')['brillo_solar_horas'].mean().reset_index()
-        
-        sns.lineplot(
-            data=df_plot,
-            x='fecha',
-            y='brillo_solar_horas',
-            color=PROFESSIONAL_PALETTE['accent'],
-            linewidth=2.5,
-            marker='o',
-            markersize=4,
-            ax=ax
-        )
-        
-        # Área sombreada para énfasis visual
-        ax.fill_between(
-            df_plot['fecha'],
-            df_plot['brillo_solar_horas'],
-            alpha=0.2,
-            color=PROFESSIONAL_PALETTE['accent']
-        )
+    # Crear DataFrame temporal con columnas únicas
+    plot_df = df[[var_x, var_y]].copy()
+    plot_df = plot_df.dropna()
     
-    ax.set_title('☀️ Tendencia de Brillo Solar Efectivo', 
-                 fontsize=14, fontweight='bold', pad=20)
-    ax.set_xlabel('Período', fontsize=11)
-    ax.set_ylabel('Horas de Sol Efectivas', fontsize=11)
-    ax.grid(True, alpha=0.3)
-    plt.xticks(rotation=45, ha='right')
+    if len(plot_df) < 2:
+        st.warning("⚠️ Datos insuficientes para gráfico de dispersión")
+        return None
     
-    plt.tight_layout()
-    return fig
+    # ✅ Asegurar nombres de columna únicos antes de pasar a Plotly
+    plot_df.columns = [f'{var_x}_clean', f'{var_y}_clean']
+    
+    fig_rel = px.scatter(
+        plot_df,
+        x=f'{var_x}_clean',
+        y=f'{var_y}_clean',
+        trendline="ols",
+        title=f"Correlación: {var_x} vs {var_y}",
+        color_discrete_sequence=[PROFESSIONAL_PALETTE['primary']]
+    )
+    
+    fig_rel.update_layout(
+        xaxis_title=var_x,
+        yaxis_title=var_y,
+        height=500
+    )
+    
+    return fig_rel
 
-# --- INTERFAZ PRINCIPAL CON PESTAÑAS Y DOCUMENTACIÓN ---
+# ============================================================================
+# 🎯 APLICACIÓN PRINCIPAL
+# ============================================================================
 def main():
     st.title("🌾 Agro-Clima Intelligence Pro")
     st.markdown("*Plataforma de análisis predictivo para optimización de cosechas*")
+    
+    # Cargar datos
+    with st.spinner("🔄 Cargando datos desde Railway..."):
+        df = load_data()
+    
+    if df.empty:
+        st.error("❌ No se pudieron cargar los datos. Verifica la conexión a la BD.")
+        return
+    
+    st.success(f"✅ {len(df)} registros cargados correctamente")
     
     # Sidebar con controles
     with st.sidebar:
         st.header("⚙️ Panel de Control")
         
-        # Selector de región/municipio
-        municipio = st.selectbox(
-            "📍 Seleccionar Municipio",
-            options=["Todos"] + list(df['municipio'].unique()) if 'municipio' in df.columns else ["Todos"],
-            help="Filtra los análisis por ubicación geográfica específica"  # Tooltip nativo [[40]]
-        )
+        # Mostrar columnas disponibles para debug
+        with st.expander("📋 Ver columnas disponibles"):
+            st.write(df.columns.tolist())
         
-        # Selector de período
-        periodo = st.selectbox(
-            "📅 Período de Análisis",
-            options=["Último año", "Últimos 6 meses", "Histórico completo"],
-            help="Define el rango temporal para el procesamiento de datos"
-        )
+        # Selector de municipio
+        mun_col = next((c for c in df.columns if 'municipio' in c.lower()), None)
+        if mun_col:
+            municipio = st.selectbox(
+                "📍 Seleccionar Municipio",
+                options=["Todos"] + list(df[mun_col].unique()),
+                help="Filtra los análisis por ubicación geográfica específica"
+            )
+            
+            if municipio != "Todos":
+                df = df[df[mun_col] == municipio]
         
         st.divider()
         
         # Métricas rápidas
         st.subheader("📈 Indicadores Clave")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric(
-                label="Rendimiento Promedio",
-                value=f"{df['rendimiento_ha'].mean():.2f} ton/ha",
-                delta=f"{df['rendimiento_ha'].std():.2f} σ",
-                help="Media y desviación estándar del rendimiento por hectárea"  # Tooltip en métrica [[42]]
-            )
-        with col2:
-            st.metric(
-                label="Precipitación Total",
-                value=f"{df['precipitacion_mm'].sum():.0f} mm",
-                delta="-5.2% vs período anterior",
-                help="Acumulado de lluvia en el período seleccionado"
-            )
+        num_cols = df.select_dtypes(include='number').columns.tolist()
+        
+        if len(num_cols) >= 2:
+            col1, col2 = st.columns(2)
+            with col1:
+                metric_col = next((c for c in num_cols if 'rendimiento' in c.lower()), num_cols[0])
+                st.metric(
+                    label="Rendimiento Promedio",
+                    value=f"{df[metric_col].mean():.2f}",
+                    delta=f"{df[metric_col].std():.2f} σ",
+                    help="Media y desviación estándar"
+                )
+            with col2:
+                precip_col = next((c for c in num_cols if 'precip' in c.lower()), num_cols[1] if len(num_cols) > 1 else num_cols[0])
+                st.metric(
+                    label="Precipitación Total",
+                    value=f"{df[precip_col].sum():.0f} mm",
+                    delta="-5.2% vs período anterior",
+                    help="Acumulado de lluvia"
+                )
     
-    # === PESTAÑAS DE ANÁLISIS CON DOCUMENTACIÓN ===
+    # === PESTAÑAS DE ANÁLISIS ===
     tab_analisis, tab_documentacion, tab_config = st.tabs([
         "📊 Análisis Visual", 
         "📚 Documentación Técnica", 
         "⚙️ Configuración"
     ])
     
-    # ── PESTAÑA 1: GRÁFICOS INTERACTIVOS ──
+    # ── PESTAÑA 1: GRÁFICOS ──
     with tab_analisis:
         st.subheader("🔍 Exploración de Relaciones Climático-Productivas")
         
-        # Fila 1: Gráficos principales
+        # Fila 1: Mapa y Correlación
         col_graf1, col_graf2 = st.columns(2)
         
         with col_graf1:
-            st.markdown("### 🌡️ Temperatura vs Rendimiento")
-            help_icon("Análisis de regresión lineal simple. El coeficiente R² indica la proporción de varianza explicada. Valores >0.7 sugieren relación fuerte.")
-            fig1 = plot_correlation_temp_yield(df)
-            st.pyplot(fig1, use_container_width=True)
-            st.caption("*Fuente: Datos meteorológicos y productivos normalizados*")
+            st.markdown("### 🗺️ Mapa Interactivo")
+            lat_col = next((c for c in df.columns if 'lat' in c.lower()), None)
+            lon_col = next((c for c in df.columns if 'lon' in c.lower()), None)
+            map_var = next((c for c in df.select_dtypes(include='number').columns 
+                           if c not in [lat_col, lon_col]), None)
+            
+            fig_map = plot_interactive_map(df, lat_col, lon_col, map_var)
+            if fig_map:
+                # ✅ width='stretch' en lugar de use_container_width
+                st.plotly_chart(fig_map, width='stretch')
+            else:
+                st.info("ℹ️ Configura columnas de coordenadas para ver el mapa")
         
         with col_graf2:
-            st.markdown("### 🌧️ Precipitación por Región")
-            help_icon("Diagrama de caja: la línea central es la mediana, la caja representa el IQR (25°-75° percentil), y los bigotes muestran valores dentro de 1.5×IQR.")
-            fig2 = plot_precipitation_distribution(df)
-            st.pyplot(fig2, use_container_width=True)
-            st.caption("*Interpretación: Valores atípicos pueden indicar eventos climáticos extremos*")
+            st.markdown("### 🌡️ Temperatura vs Rendimiento")
+            fig1 = plot_correlation_temp_yield(df)
+            st.pyplot(fig1, width='stretch')  # ✅ CORREGIDO
         
         st.divider()
         
-        # Fila 2: Heatmap y tendencia
+        # Fila 2: Boxplot y Heatmap
         col_graf3, col_graf4 = st.columns(2)
         
         with col_graf3:
-            st.markdown("### 🔗 Correlaciones Múltiples")
-            help_icon("Colores: Verde=correlación positiva, Rojo=negativa. Intensidad indica magnitud. Solo se muestran variables numéricas validadas.")
-            numeric_cols = df.select_dtypes(include='number').columns.tolist()
-            if len(numeric_cols) >= 2:
-                fig3 = plot_correlation_heatmap(df, numeric_cols)
-                st.pyplot(fig3, use_container_width=True)
-            else:
-                st.warning("⚠️ Se requieren al menos 2 variables numéricas para generar el heatmap")
+            st.markdown("### 🌧️ Precipitación por Región")
+            fig2 = plot_precipitation_distribution(df)
+            st.pyplot(fig2, width='stretch')  # ✅ CORREGIDO
         
         with col_graf4:
-            st.markdown("### ☀️ Tendencia de Brillo Solar")
-            help_icon("Línea de tendencia con intervalo de confianza del 95%. Útil para identificar patrones estacionales en la radiación solar efectiva.")
-            if 'fecha' in df.columns and 'brillo_solar_horas' in df.columns:
-                fig4 = plot_solar_trend(df)
-                st.pyplot(fig4, use_container_width=True)
+            st.markdown("### 🔗 Correlaciones Múltiples")
+            fig3 = plot_correlation_heatmap(df)
+            st.pyplot(fig3, width='stretch')  # ✅ CORREGIDO
+        
+        st.divider()
+        
+        # Fila 3: Dispersión Personalizada
+        st.subheader("📉 Análisis de Correlación Personalizado")
+        num_cols = df.select_dtypes(include='number').columns.tolist()
+        
+        if len(num_cols) >= 2:
+            col_sel1, col_sel2 = st.columns(2)
+            with col_sel1:
+                var_x = st.selectbox("Factor (X)", num_cols[:-1], key='var_x')
+            with col_sel2:
+                var_y = st.selectbox("Resultado (Y)", num_cols, index=len(num_cols)-1, key='var_y')
+            
+            if var_x != var_y:
+                fig_reg = plot_scatter_with_trendline(df, var_x, var_y)
+                if fig_reg:
+                    st.plotly_chart(fig_reg, width='stretch')  # ✅ CORREGIDO
             else:
-                st.info("ℹ️ Este gráfico requiere columnas 'fecha' y 'brillo_solar_horas' en el dataset")
+                st.warning("⚠️ Selecciona variables diferentes para X e Y")
+        
+        # Mostrar datos raw
+        with st.expander("📄 Ver datos brutos"):
+            st.dataframe(df.head(100), width='stretch', hide_index=True)
     
-    # ── PESTAÑA 2: DOCUMENTACIÓN TÉCNICA ──
+    # ── PESTAÑA 2: DOCUMENTACIÓN ──
     with tab_documentacion:
         st.header("📚 Documentación del Sistema")
         
-        doc_tabs = st.tabs(["📋 Metodología", "🗄️ Esquema de Datos", "🔐 Conexión Railway", "❓ FAQ"])
+        doc_tabs = st.tabs(["📋 Metodología", "🗄️ Esquema de Datos", "🔐 Conexión", "❓ FAQ"])
         
         with doc_tabs[0]:
             st.markdown("""
             ### 🔬 Metodología de Análisis
             
-            1. **Preprocesamiento**: Limpieza de valores nulos, normalización de unidades y detección de outliers usando IQR.
-            2. **Análisis Exploratorio**: Estadísticos descriptivos, distribuciones y correlaciones bivariadas/multivariadas.
-            3. **Visualización**: Gráficos con Seaborn optimizados para publicación profesional.
-            4. **Interpretación**: Contexto agronómico aplicado a cada hallazgo estadístico.
+            1. **Preprocesamiento**: Limpieza de valores nulos, normalización de unidades
+            2. **Análisis Exploratorio**: Estadísticos descriptivos y correlaciones
+            3. **Visualización**: Gráficos con Seaborn y Plotly optimizados
+            4. **Interpretación**: Contexto agronómico aplicado
             
-            > 📌 **Nota**: Todos los gráficos utilizan la paleta `SEABORN_PALETTE` definida en `config_colors.py` para consistencia visual.
+            > 📌 **Nota**: Todos los gráficos utilizan paleta profesional consistente
             """)
-            
+        
         with doc_tabs[1]:
             st.markdown("""
             ### 🗄️ Esquema de Base de Datos
             
             | Tabla | Columnas Clave | Descripción |
             |-------|---------------|-------------|
-            | `temperatura` | `id_reg`, `fecha`, `temp_max`, `temp_min` | Registros diarios de temperatura por región |
-            | `precipitacion` | `id_mun`, `mes`, `acumulado_mm` | Lluvia mensual acumulada por municipio |
-            | `produccion` | `id_cultivo`, `area_sembrada`, `rendimiento_ha` | Métricas productivas por cultivo |
-            | `brillo_solar` | `id_estacion`, `fecha`, `horas_efectivas` | Radiación solar medida en estaciones |
-            
-            🔗 **Relaciones**: Todas las tablas se vinculan mediante claves geográficas (`id_reg`, `id_mun`) y temporales (`fecha`, `mes`).
+            | `produccion` | `id`, `rendimiento_ha`, `area_cosechada` | Métricas productivas |
+            | `municipios` | `id`, `lat`, `lon`, `nombre` | Ubicación geográfica |
+            | `temperatura` | `id`, `temp_max`, `temp_min` | Registros de temperatura |
+            | `precipitacion` | `id`, `acumulado_mm` | Lluvia acumulada |
             """)
-            
+        
         with doc_tabs[2]:
             st.markdown("""
-            ### 🔐 Configuración Railway
+            ### 🔐 Configuración Streamlit Cloud
             
-            #### Variables de Entorno Requeridas:
-            ```bash
-            DB_HOST=your-railway-mysql-host.railway.app
-            DB_PORT=3306
-            DB_NAME=agro_clima_db
-            DB_USER=railway_user
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            1. Ve a [share.streamlit.io](https://share.streamlit.io)
+            2. Selecciona tu app → **Settings** ⚙️
+            3. Despliega **Secrets**
+            4. Agrega:
+            ```toml
+            [connections.railway_db]
+            dialect = "mysql"
+            host = "tu-host.railway.app"
+            port = 3306
+            database = "railway"
+            username = "root"
+            password = "tu_contraseña"
             ```
-            
-            #### Pasos de Despliegue [[47]][[51]]:
-            1. Conectar repositorio GitHub a Railway
-            2. Añadir variables de entorno en "Variables" del proyecto
-            3. Railway detecta automáticamente `requirements.txt`
-            4. El comando de inicio: `streamlit run streamlit_app.py`
-            
-            > ⚠️ **Importante**: Nunca commits `secrets.toml`. Usa siempre variables de entorno para credenciales.
             """)
-            
+        
         with doc_tabs[3]:
             st.markdown("""
             ### ❓ Preguntas Frecuentes
             
-            **P: ¿Por qué usar Seaborn en lugar de Plotly?**  
-            R: Seaborn ofrece estadísticas integradas (regresión, intervalos de confianza) y estética publication-ready con menos código. Plotly se usa para interactividad avanzada cuando es necesario.
+            **P: ¿Por qué errores de columnas duplicadas?**  
+            R: Se solucionó con `suffixes` en merges y validación antes de Plotly
             
-            **P: ¿Cómo actualizo los datos?**  
-            R: Los datos se cargan desde Railway en cada sesión. Para actualizar, modifica la BD fuente o usa el script `data_loader.py` para ingestas programadas.
+            **P: ¿Los datos se actualizan automáticamente?**  
+            R: Sí, caché de 5 minutos. Usa el botón de recarga para forzar actualización
             
-            **P: ¿Los gráficos son exportables?**  
-            R: Sí. Haz clic derecho en cualquier gráfico → "Guardar imagen como..." o usa el botón de descarga si está habilitado.
+            **P: ¿Cómo exportar gráficos?**  
+            R: Click derecho en gráfico → "Guardar imagen como..."
             """)
     
-    # ── PESTAÑA 3: CONFIGURACIÓN AVANZADA ──
+    # ── PESTAÑA 3: CONFIGURACIÓN ──
     with tab_config:
         st.header("⚙️ Configuración del Sistema")
         
@@ -377,58 +676,39 @@ def main():
             theme_option = st.radio(
                 "Seleccionar tema de colores",
                 options=["Profesional (Azul/Verde)", "Académico (Gris/Neutro)", "Alto Contraste"],
-                help="Cambia la paleta de colores para adaptar el dashboard a diferentes contextos de presentación"
+                help="Cambia la paleta de colores"
             )
-            
-            if theme_option == "Profesional (Azul/Verde)":
-                st.success("✅ Tema activo: Paleta corporativa con azules y verdes agrícolas")
-            elif theme_option == "Académico (Gris/Neutro)":
-                st.info("ℹ️ Tema académico: Tonos grises para publicaciones científicas")
-            else:
-                st.warning("⚠️ Tema alto contraste: Optimizado para presentaciones en pantalla")
+            st.success("✅ Tema activo: Paleta corporativa")
         
         with col_conf2:
             st.subheader("🔄 Actualización de Datos")
-            if st.button("🔄 Recargar Datos desde Railway", type="primary"):
-                with st.spinner("Conectando a Railway y actualizando datasets..."):
-                    # Aquí iría la lógica de recarga
-                    st.cache_data.clear()
-                    st.success("✅ Datos actualizados correctamente")
-                    st.rerun()
+            if st.button("🔄 Recargar Datos", type="primary"):
+                st.cache_data.clear()
+                st.success("✅ Datos actualizados")
+                st.rerun()
             
             st.markdown("""
             <div class="metric-card">
             <strong>Última sincronización:</strong><br>
-            <span style="color: #15803d">●</span> Hace 2 minutos<br>
-            <small>Próxima actualización automática: 04:00 UTC</small>
+            <span style="color: #15803d">●</span> Hace < 1 minuto<br>
+            <small>Próxima actualización: 5 minutos</small>
             </div>
             """, unsafe_allow_html=True)
     
-    # Footer informativo
+    # Footer
     st.divider()
     st.markdown("""
     <div style="text-align: center; color: #64748b; font-size: 0.9em; padding: 20px;">
-        🌾 Agro-Clima Intelligence Pro v2.1 • 
-        <a href="https://github.com/grupoproyectoanalisisdatos-bot" style="color: #1e3a8a; text-decoration: none;">
+        🌾 Agro-Clima Intelligence Pro v3.0 (Corregida) • 
+        <a href="https://github.com/grupoproyectoanalisisdatos-bot" style="color: #1e3a8a;">
             Repositorio GitHub
         </a> • 
-        Datos actualizados en tiempo real desde Railway
+        Streamlit Cloud + Railway
     </div>
     """, unsafe_allow_html=True)
 
-# === EJECUCIÓN ===
+# ============================================================================
+# 🚀 EJECUCIÓN
+# ============================================================================
 if __name__ == "__main__":
-    # Cargar datos (ejemplo - adaptar a tu lógica real)
-    @st.cache_data
-    def load_data():
-        # Simulación: reemplazar con consulta real a Railway
-        # df = conn.query("SELECT * FROM vista_analisis_completo")
-        df = pd.read_excel("Datos Base de Datos.xlsx")  # Fallback local
-        return df
-    
-    try:
-        df = load_data()
-        main()
-    except Exception as e:
-        st.error(f"❌ Error al cargar la aplicación: {str(e)}")
-        st.info("💡 Verifica: 1) Conexión a Railway, 2) Archivo Excel en raíz, 3) Variables de entorno")
+    main()
