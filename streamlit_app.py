@@ -1,168 +1,186 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import os
+import mysql.connector
+import plotly.express as px
+from datetime import datetime
 
-# --- PRE-FLIGHT CHECK: IMPORTACIÓN DE LIBRERÍAS ---
-try:
-    import plotly.express as px
-    import plotly.graph_objects as go
-except ImportError:
-    st.error("⚠️ Error Crítico: La librería 'plotly' no está instalada.")
-    st.info("Por favor, asegúrate de que tu archivo 'requirements.txt' contenga la palabra: plotly")
-    st.stop()
-
-# --- CONFIGURACIÓN DE PÁGINA ---
+# Page configuration
 st.set_page_config(
-    page_title="Data Intelligence - Agro Analítica",
-    page_icon="📊",
+    page_title="GeoClima Avanzatec",
+    page_icon="🌍",
     layout="wide"
 )
 
-# --- FUNCIÓN DE LIMPIEZA PROFUNDA ---
-def clean_dataframe_columns(df):
-    """
-    Limpia nombres de columnas eliminando caracteres especiales y forzando unicidad.
-    """
-    clean_names = []
-    for col in df.columns:
-        name = str(col).strip().replace(':', '').replace('.', '')
-        clean_names.append(name if name else "columna_sin_nombre")
-    
-    final_cols = []
-    counts = {}
-    for name in clean_names:
-        low_name = name.lower()
-        if low_name in counts:
-            counts[low_name] += 1
-            final_cols.append(f"{name}_{counts[low_name]}")
-        else:
-            counts[low_name] = 0
-            final_cols.append(name)
-            
-    df.columns = final_cols
-    df = df.dropna(how='all', axis=1)
-    
-    for col in df.columns:
-        # Intentar convertir a fecha si el nombre sugiere tiempo
-        if any(x in col.lower() for x in ['fecha', 'date', 'periodo']):
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-        
-        # Intentar numérico
-        converted_num = pd.to_numeric(df[col], errors='coerce')
-        if not converted_num.isna().all():
-            df[col] = converted_num
-        else:
-            if not pd.api.types.is_datetime64_any_dtype(df[col]):
-                df[col] = df[col].astype(str).replace(['nan', 'None', 'NaT'], np.nan)
-    
-    return df
+# --- STYLES ---
+st.markdown("""
+    <style>
+    .main { background-color: #f0f2f6; }
+    .hero-section {
+        padding: 60px;
+        text-align: center;
+        background: linear-gradient(135deg, #1e3a8a, #3b82f6);
+        color: white;
+        border-radius: 15px;
+        margin-bottom: 30px;
+    }
+    .feature-card {
+        padding: 20px;
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        text-align: center;
+        height: 100%;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- CARGA DE DATOS RESILIENTE ---
+# --- DATABASE CONNECTION ---
+def get_connection():
+    """Establishes connection with MySQL on Railway using Secrets"""
+    try:
+        return mysql.connector.connect(
+            host=st.secrets["DB_HOST"],
+            user=st.secrets["DB_USER"],
+            password=st.secrets["DB_PASSWORD"],
+            database=st.secrets["DB_NAME"],
+            port=int(st.secrets["DB_PORT"])
+        )
+    except Exception as e:
+        st.error(f"Error connecting to database: {e}")
+        return None
+
 @st.cache_data(ttl=600)
-def load_data():
-    excel_file = "Datos  Base de Datos.xlsx"
-    if os.path.exists(excel_file):
+def load_data_from_db():
+    """Loads data from the MySQL view"""
+    conn = get_connection()
+    if conn:
         try:
-            excel_data = pd.ExcelFile(excel_file, engine='openpyxl')
-            dfs = {}
-            for sheet in excel_data.sheet_names:
-                raw_df = pd.read_excel(excel_file, sheet_name=sheet)
-                dfs[sheet] = clean_dataframe_columns(raw_df)
-            return dfs, None
+            # ACTUALIZACIÓN: Nombre de la vista cambiado a 'vista_municipios_geo'
+            query = "SELECT * FROM vista_municipios_geo" 
+            df = pd.read_sql(query, conn)
+            conn.close()
+            
+            # Standardize column names to lowercase
+            df.columns = [c.lower() for c in df.columns]
+            return df
         except Exception as e:
-            return None, f"Error al procesar el Excel: {e}"
-    return None, f"Archivo '{excel_file}' no encontrado."
+            st.error(f"Error executing query: {e}")
+            return pd.DataFrame()
+    return pd.DataFrame()
 
-# --- INTERFAZ DE USUARIO ---
-st.title("📊 Inteligencia de Datos Agrícolas")
-st.markdown("Análisis avanzado de variables climáticas y productivas.")
+# --- DATA LOADING ---
+df_municipios = load_data_from_db()
 
-dfs, error = load_data()
+# Fallback data if database is empty or connection fails
+if df_municipios.empty:
+    st.warning("No se detectaron datos en la vista 'vista_municipios_geo'. Usando datos de ejemplo.")
+    df_municipios = pd.DataFrame({
+        'municipio': ["Bogotá", "Medellín"], 
+        'latitud': [4.6097, 6.2442], 
+        'longitud': [-74.0817, -75.5812], 
+        'temp_avg': [14.5, 22.0], 
+        'valor_num': [850, 1500],
+        'brillo_solar': [5, 6]
+    })
 
-if error:
-    st.error(error)
-else:
-    with st.sidebar:
-        st.header("⚙️ Configuración")
-        selected_sheet = st.selectbox("Seleccionar Tabla", list(dfs.keys()))
-        df = dfs[selected_sheet]
-        st.success(f"Columnas procesadas: {len(df.columns)}")
+# --- COLUMN SEARCH LOGIC ---
+lat_col = next((c for c in df_municipios.columns if c in ['latitud', 'lat', 'latitude']), None)
+lon_col = next((c for c in df_municipios.columns if c in ['longitud', 'lon', 'longitude']), None)
+mun_col = next((c for c in df_municipios.columns if c in ['municipio', 'nombre', 'city', 'town']), 'municipio')
+temp_col = next((c for c in df_municipios.columns if 'temp' in c), 'temp_avg')
+precip_col = next((c for c in df_municipios.columns if any(p in c for p in ['precip', 'lluvia', 'valor_num'])), 'precip_anual')
+brillo_col = next((c for c in df_municipios.columns if any(s in c for s in ['brillo', 'solar', 'sun'])), 'brillo_solar')
 
-    # Clasificación de columnas para UI
-    date_cols = df.select_dtypes(include=['datetime64', 'datetime']).columns.tolist()
-    # Si no hay columnas de tipo datetime, buscar nombres que sugieran fechas (anio, mes)
-    if not date_cols:
-        date_cols = [c for c in df.columns if any(x in c.lower() for x in ['fecha', 'anio', 'mes', 'periodo'])]
+# --- NAVIGATION ---
+st.sidebar.title("📌 Navegación")
+page = st.sidebar.radio("Ir a:", ["Inicio", "Explorador Climático", "Análisis Agrícola"])
+
+# --- PAGE 1: LANDING PAGE ---
+if page == "Inicio":
+    st.markdown("""
+        <div class="hero-section">
+            <h1>Bienvenido a GeoClima Avanzatec</h1>
+            <p style="font-size: 1.2rem;">Análisis climático municipal de precisión en tiempo real.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown('<div class="feature-card"><h3>📊 Visualización</h3><p>Gráficos dinámicos de temperatura y precipitación diaria.</p></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="feature-card"><h3>📍 Geolocalización</h3><p>Mapas interactivos con coordenadas de precisión de la vista Geo.</p></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<div class="feature-card"><h3>🌾 Agro-Inteligencia</h3><p>Recomendaciones de siembra basadas en históricos de lluvia.</p></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.subheader("📍 Municipios en el Sistema")
+    
+    if lat_col and lon_col:
+        map_df = df_municipios[[lat_col, lon_col]].copy()
+        map_df.columns = ['lat', 'lon']
+        st.map(map_df)
+    else:
+        st.error("No se encontraron columnas de coordenadas en 'vista_municipios_geo'.")
+
+# --- PAGE 2: DASHBOARD ---
+elif page == "Explorador Climático":
+    st.title("📊 Análisis Detallado")
+    
+    if mun_col in df_municipios.columns:
+        municipio_sel = st.sidebar.selectbox("Seleccione el Municipio", df_municipios[mun_col].unique())
+        datos_mun = df_municipios[df_municipios[mun_col] == municipio_sel].iloc[0]
+
+        col_stats, col_map = st.columns([1, 1])
         
-    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    # Excluir latitud y longitud de los análisis de tendencia
-    geo_keywords = ['lat', 'lon', 'latitud', 'longitud']
-    num_cols = [c for c in num_cols if not any(k in c.lower() for k in geo_keywords)]
-
-    tab1, tab2, tab3 = st.tabs(["🎯 Análisis Temporal", "🌍 Mapa", "📄 Datos Raw"])
-
-    with tab1:
-        st.subheader("Análisis de Tendencias")
-        if len(num_cols) > 0:
-            c1, c2 = st.columns(2)
+        with col_stats:
+            st.write(f"### Indicadores: {municipio_sel}")
+            st.metric("Temperatura Promedio", f"{datos_mun.get(temp_col, 0):.1f} °C")
+            st.metric("Precipitación Total", f"{datos_mun.get(precip_col, 0):.1f} mm")
             
-            # Selección de Eje X (Tiempo)
-            if date_cols:
-                x_axis = c1.selectbox("Eje Temporal (X)", date_cols)
+            sensacion = datos_mun.get(temp_col, 0) + (0.2 * datos_mun.get(brillo_col, 5))
+            st.metric("Sensación Térmica Est.", f"{sensacion:.1f} °C")
+
+        with col_map:
+            if lat_col and lon_col:
+                st.write("### Ubicación Localizada")
+                map_data = pd.DataFrame({
+                    'lat': [datos_mun[lat_col]], 
+                    'lon': [datos_mun[lon_col]]
+                })
+                st.map(map_data, zoom=10)
+    else:
+        st.error(f"La columna de municipios no fue encontrada en la vista.")
+
+# --- PAGE 3: AGRICULTURAL ANALYSIS ---
+elif page == "Análisis Agrícola":
+    st.title("🌾 Recomendaciones Técnicas de Siembra")
+    
+    if mun_col in df_municipios.columns:
+        municipio_sel = st.selectbox("Analizar municipio:", df_municipios[mun_col].unique())
+        datos_mun = df_municipios[df_municipios[mun_col] == municipio_sel].iloc[0]
+        
+        col_a, col_b = st.columns(2)
+        
+        with col_a:
+            st.subheader("Idoneidad de Cultivo")
+            precip = datos_mun.get(precip_col, 0)
+            
+            if precip > 1800:
+                st.success("✅ Recomendado: Arroz o Plátano")
+            elif 1000 <= precip <= 1800:
+                st.success("✅ Recomendado: Café o Maíz")
             else:
-                x_axis = c1.selectbox("Eje X (Numérico)", num_cols)
-            
-            # Selección de Variable (Temperatura, Valor, etc)
-            # Intentar pre-seleccionar 'Valor' o 'Temperatura' si existen
-            default_y = 0
-            for i, col in enumerate(num_cols):
-                if any(x in col.lower() for x in ['valor', 'temp', 'precip']):
-                    default_y = i
-                    break
-            y_axis = c2.selectbox("Variable de Análisis (Y)", num_cols, index=default_y)
-            
-            plot_df = df.dropna(subset=[x_axis, y_axis]).sort_values(by=x_axis)
-            
-            if not plot_df.empty:
-                # Gráfico de línea para series temporales
-                if x_axis in date_cols:
-                    fig = px.line(plot_df, x=x_axis, y=y_axis, markers=True, 
-                                 title=f"Evolución de {y_axis} en el tiempo",
-                                 template="plotly_white", color_discrete_sequence=['#1e3a8a'])
-                else:
-                    fig = px.scatter(plot_df, x=x_axis, y=y_axis, trendline="ols",
-                                    title=f"Relación entre {x_axis} y {y_axis}",
-                                    template="plotly_white")
+                st.info("ℹ️ Recomendado: Cultivos de secano")
                 
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("No hay datos válidos para la combinación seleccionada.")
-        else:
-            st.info("No se encontraron columnas numéricas para graficar.")
+        with col_b:
+            fig = px.bar(df_municipios, 
+                         x=mun_col, 
+                         y=precip_col, 
+                         title="Comparativa Regional de Lluvias",
+                         labels={mun_col: 'Municipio', precip_col: 'Precipitación (mm)'},
+                         color=precip_col, 
+                         color_continuous_scale="Viridis")
+            st.plotly_chart(fig)
 
-    with tab2:
-        lat_col = next((c for c in df.columns if any(k in c.lower() for k in ['lat', 'latitud'])), None)
-        lon_col = next((c for c in df.columns if any(k in c.lower() for k in ['lon', 'longitud'])), None)
-        
-        if lat_col and lon_col and num_cols:
-            target = st.selectbox("Indicador Visual (Mapa)", num_cols)
-            map_df = df.dropna(subset=[lat_col, lon_col, target])
-            if not map_df.empty:
-                fig_map = px.scatter_mapbox(
-                    map_df, lat=lat_col, lon=lon_col, color=target, size=target,
-                    mapbox_style="carto-positron", zoom=5, height=600,
-                    title=f"Distribución Geográfica de {target}"
-                )
-                st.plotly_chart(fig_map, use_container_width=True)
-            else:
-                st.error("Datos geográficos insuficientes.")
-        else:
-            st.warning("Se requieren columnas de Latitud y Longitud para el mapa.")
-
-    with tab3:
-        st.subheader("Explorador de Datos")
-        st.dataframe(df, use_container_width=True)
-
-st.divider()
-st.caption("Estructura mejorada: Análisis enfocado en series temporales y relación fecha-valor.")
+st.sidebar.markdown("---")
+st.sidebar.caption("Proyecto Avanzatec 2026 | Grupo N - Sala 14")
