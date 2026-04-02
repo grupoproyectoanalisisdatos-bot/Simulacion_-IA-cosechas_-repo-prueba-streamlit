@@ -1,12 +1,10 @@
 # ============================================================================
-# 🌾 Agro-Clima Intelligence Pro - streamlit_app.py (VERSIÓN FINAL)
+# 🌾 Agro-Clima Intelligence Pro - streamlit_app.py (VERSIÓN FINAL - BackupBD.sql)
 # ============================================================================
-# ✅ Correcciones basadas en BackupBD.sql:
-# 1. Columnas reales de coordenadas (latitud, longitud por municipio)
-# 2. Manejo de formato mixto (coma/punto) en valores numéricos
-# 3. scatter_map con parámetro 'style' correcto
-# 4. width='stretch' en lugar de use_container_width
-# 5. Validación de columnas antes de dropna()
+# ✅ Basado en estructura real de BackupBD.sql:
+# - Columnas: municipio, latitud, longitud, fecha, brillo_solar, etc.
+# - Formato numérico con coma decimal (ej: '8,8469444440')
+# - Corrección de todos los errores de logs
 # ============================================================================
 
 import streamlit as st
@@ -18,6 +16,7 @@ import plotly.express as px
 from sqlalchemy import create_engine, text
 import warnings
 
+# Suprimir warnings no críticos
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -32,6 +31,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Paleta profesional
 PROFESSIONAL_PALETTE = {
     "primary": "#1e3a8a",
     "secondary": "#15803d",
@@ -47,6 +47,7 @@ SEABORN_PALETTE = [
     "#8b5cf6",
 ]
 
+# CSS personalizado
 st.markdown("""
 <style>
     .main { background-color: #f8fafc; }
@@ -79,11 +80,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# 🔐 CONEXIÓN A BASE DE DATOS
+# 🔐 CONEXIÓN A BASE DE DATOS (Streamlit Cloud + Railway)
 # ============================================================================
 @st.cache_resource
 def init_connection():
-    """Conecta a Railway usando st.secrets (Streamlit Cloud)"""
+    """Conecta a Railway usando st.secrets (configurado en Streamlit Cloud)"""
     try:
         creds = st.secrets["connections"]["railway_db"]
         dialect = creds.get("dialect", "mysql")
@@ -106,12 +107,12 @@ def init_connection():
         return None
 
 # ============================================================================
-# 🧹 LIMPIEZA DE DATOS (CRÍTICO PARA TU FORMATO)
+# 🧹 LIMPIEZA DE DATOS (CRÍTICO - Formato BackupBD.sql)
 # ============================================================================
 def clean_dataframe(df):
     """
-    Limpia tipos de datos según formato de BackupBD.sql
-    ✅ Maneja formato mixto: '284,2' y '284.2'
+    Limpia datos según formato real de BackupBD.sql
+    ✅ Convierte comas decimales a puntos: '8,8469' → 8.8469
     ✅ Normaliza nombres de columnas
     """
     if df.empty:
@@ -119,68 +120,53 @@ def clean_dataframe(df):
     
     df_clean = df.copy()
     
-    # Columnas numéricas que pueden venir con coma como decimal
-    numeric_cols = ['precipitacion', 'precipitacion_mm', 'temperatura', 
-                    'temperatura_max', 'temperatura_min', 'rendimiento',
-                    'rendimiento_ha', 'area_cosechada', 'area_sembrada']
+    # Columnas que pueden tener coma como decimal (según BackupBD.sql)
+    decimal_cols = ['latitud', 'longitud', 'brillo_solar', 'precipitacion', 
+                    'temperatura', 'rendimiento', 'area_cosechada']
     
-    for col in numeric_cols:
+    for col in decimal_cols:
         if col in df_clean.columns:
             # Reemplazar coma por punto y convertir a numérico
             df_clean[col] = df_clean[col].astype(str).str.replace(',', '.')
             df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
     
-    # Columnas de coordenadas (latitud, longitud)
-    coord_cols = ['latitud', 'longitud', 'latitude', 'longitude', 'lat', 'lon']
-    for col in coord_cols:
-        if col in df_clean.columns:
-            df_clean[col] = df_clean[col].astype(str).str.replace(',', '.')
-            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
-    
-    # Normalizar nombres de columnas
+    # Normalizar nombres de columnas (minúsculas, sin espacios)
     df_clean.columns = df_clean.columns.str.strip().str.lower()
     
     # Eliminar columnas duplicadas
     df_clean = df_clean.loc[:, ~df_clean.columns.duplicated()]
     
+    # Eliminar filas completamente nulas
+    df_clean = df_clean.dropna(how='all')
+    
     return df_clean
 
 # ============================================================================
-# 🗺️ DETECTAR COLUMNAS DE COORDENADAS (SEGÚN TU BD)
+# 🗺️ DETECTAR COLUMNAS REALES (Según BackupBD.sql)
 # ============================================================================
 def detect_coordinate_columns(df):
     """
-    Detecta columnas de latitud y longitud según tu estructura real
-    ✅ Basado en BackupBD.sql: coordenadas por municipio
+    Detecta columnas de latitud y longitud según BackupBD.sql
+    ✅ Nombres reales: 'latitud', 'longitud'
     """
-    # Posibles nombres para latitud
-    lat_candidates = ['latitud', 'latitude', 'lat', 'coord_lat', 'latitud_municipio']
-    lat_col = next((c for c in lat_candidates if c in df.columns), None)
+    # Latitud (según tu backup)
+    lat_col = None
+    for candidate in ['latitud', 'latitude', 'lat', 'coord_lat']:
+        if candidate in df.columns:
+            lat_col = candidate
+            break
     
-    # Posibles nombres para longitud
-    lon_candidates = ['longitud', 'longitude', 'lon', 'coord_lon', 'longitud_municipio']
-    lon_col = next((c for c in lon_candidates if c in df.columns), None)
-    
-    # Si no encuentra, buscar columnas con valores en rango de coordenadas
-    if lat_col is None or lon_col is None:
-        for col in df.select_dtypes(include=['float64', 'int64']).columns:
-            col_data = df[col].dropna()
-            if len(col_data) > 0:
-                # Latitud: entre -90 y 90
-                if lat_col is None and col_data.min() >= -90 and col_data.max() <= 90:
-                    # Excluir si parece longitud (valores negativos grandes)
-                    if col_data.min() >= 0 or col_data.max() < 50:
-                        lat_col = col
-                # Longitud: entre -180 y 180
-                elif lon_col is None and col_data.min() >= -180 and col_data.max() <= 180:
-                    # Excluir si parece latitud (valores positivos pequeños)
-                    if col_data.min() < 0:
-                        lon_col = col
+    # Longitud (según tu backup)
+    lon_col = None
+    for candidate in ['longitud', 'longitude', 'lon', 'coord_lon']:
+        if candidate in df.columns:
+            lon_col = candidate
+            break
     
     return lat_col, lon_col
 
 # ============================================================================
-# 📊 CARGA DE DATOS
+# 📊 CARGA DE DATOS DESDE RAILWAY
 # ============================================================================
 @st.cache_data(ttl=300)
 def load_data():
@@ -190,87 +176,94 @@ def load_data():
     engine = init_connection()
     
     if engine is None:
+        # Datos de fallback (estructura real según backup)
         return pd.DataFrame({
-            'municipio': ['Arboletes', 'Medellín', 'Cali'],
-            'latitud': [8.8469, 6.2442, 3.4516],
-            'longitud': [-76.4319, -75.5812, -76.5320],
-            'precipitacion_mm': [177.4, 210.0, 291.0],
-            'fecha': pd.date_range('2005-04-01', periods=3)
+            'municipio': ['Arboletes', 'Alejandría', 'Cañasgordas'],
+            'latitud': [8.8469, 6.3763, 6.7580],
+            'longitud': [-76.4319, -75.1434, -76.0297],
+            'fecha': pd.date_range('2024-01-01', periods=3),
+            'brillo_solar': [5.4, 8.3, 6.5]
         })
     
     try:
-        # Consultar tablas disponibles
+        # Intentar consultar la tabla principal (ajustar nombre según tu BD)
         query = text("""
             SELECT 
                 municipio,
                 latitud,
                 longitud,
                 fecha,
-                precipitacion_mm,
+                brillo_solar,
+                precipitacion,
                 temperatura_max,
-                temperatura_min,
-                rendimiento_ha,
-                area_cosechada
-            FROM vista_datos_completos
+                temperatura_min
+            FROM datos_climaticos
             LIMIT 10000
         """)
         
         try:
             df = pd.read_sql(query, engine)
         except:
-            # Fallback: consultar tabla principal
-            df = pd.read_sql(text("SELECT * FROM produccion LIMIT 10000"), engine)
+            # Fallback: consultar sin nombre de columnas específico
+            df = pd.read_sql(text("SELECT * FROM datos_climaticos LIMIT 10000"), engine)
         
         df = clean_dataframe(df)
         return df
     
     except Exception as e:
         st.error(f"❌ Error al cargar datos: {str(e)}")
-        return pd.DataFrame()
+        # Datos de fallback
+        return pd.DataFrame({
+            'municipio': ['Arboletes', 'Alejandría', 'Cañasgordas'],
+            'latitud': [8.8469, 6.3763, 6.7580],
+            'longitud': [-76.4319, -75.1434, -76.0297],
+            'fecha': pd.date_range('2024-01-01', periods=3),
+            'brillo_solar': [5.4, 8.3, 6.5]
+        })
 
 # ============================================================================
-# 🗺️ GRÁFICO 1: Mapa Interactivo (CORREGIDO CON TUS COLUMNAS)
+# 🗺️ GRÁFICO 1: Mapa Interactivo (CORREGIDO)
 # ============================================================================
 def plot_interactive_map(df, lat_col, lon_col, map_var):
     """
-    Mapa interactivo con columnas reales de tu BD
-    ✅ Usa latitud/longitud de municipio
-    ✅ scatter_map con 'style' (no 'mapbox_style')
+    Mapa interactivo con columnas reales de BackupBD.sql
+    ✅ scatter_map con 'style' (NO 'mapbox_style')
+    ✅ Validación de columnas antes de dropna()
     """
-    # Validación crítica antes de continuar
+    # ✅ Validación CRÍTICA antes de continuar
     if lat_col is None or lon_col is None:
-        st.warning("⚠️ No se encontraron columnas de coordenadas (latitud/longitud)")
+        st.warning("⚠️ No se encontraron columnas de coordenadas")
+        st.info(f"📋 Columnas disponibles: {df.columns.tolist()}")
         return None
     
     if map_var is None:
         st.warning("⚠️ No se encontró variable numérica para el mapa")
         return None
     
-    # Verificar que las columnas existen
+    # Verificar que las columnas existen en el DataFrame
     required_cols = [lat_col, lon_col, map_var]
     missing_cols = [col for col in required_cols if col not in df.columns]
     
     if missing_cols:
         st.warning(f"⚠️ Columnas faltantes: {missing_cols}")
-        st.info(f"📋 Columnas disponibles: {df.columns.tolist()}")
         return None
     
-    # Preparar datos
-    map_df = df[[lat_col, lon_col, map_var]].copy()
+    # Preparar datos para el mapa
+    map_df = df[[lat_col, lon_col, map_var, 'municipio']].copy() if 'municipio' in df.columns else df[[lat_col, lon_col, map_var]].copy()
     
     # Convertir a numérico (maneja formato mixto coma/punto)
     map_df[lat_col] = pd.to_numeric(map_df[lat_col], errors='coerce')
     map_df[lon_col] = pd.to_numeric(map_df[lon_col], errors='coerce')
     map_df[map_var] = pd.to_numeric(map_df[map_var], errors='coerce')
     
-    # Dropna SOLO después de validar columnas
+    # ✅ Dropna SOLO después de validar que las columnas existen
     map_df = map_df.dropna()
     
     if map_df.empty:
         st.warning("⚠️ No hay datos válidos para el mapa")
         return None
     
-    # ✅ scatter_map con 'style' (CORRECCIÓN CRÍTICA)
+    # ✅ scatter_map con 'style' (CORRECCIÓN DE LOGS)
     fig_map = px.scatter_map(
         map_df,
         lat=lat_col,
@@ -293,83 +286,130 @@ def plot_interactive_map(df, lat_col, lon_col, map_var):
     return fig_map
 
 # ============================================================================
-# 📈 GRÁFICO 2: Correlación Temperatura vs Rendimiento
+# 📈 GRÁFICO 2: Brillo Solar por Municipio (Boxplot)
 # ============================================================================
-def plot_correlation_temp_yield(df):
-    """Gráfico de dispersión con regresión usando Seaborn"""
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    temp_col = next((c for c in df.columns if 'temp' in c.lower()), None)
-    yield_col = next((c for c in df.columns if 'rendimiento' in c.lower()), None)
-    
-    if temp_col is None or yield_col is None:
-        ax.text(0.5, 0.5, 'Datos insuficientes', ha='center', va='center', transform=ax.transAxes)
-        return fig
-    
-    df_plot = df[[temp_col, yield_col]].dropna()
-    
-    if len(df_plot) < 2:
-        ax.text(0.5, 0.5, 'Datos insuficientes', ha='center', va='center', transform=ax.transAxes)
-        return fig
-    
-    sns.regplot(
-        data=df_plot,
-        x=temp_col,
-        y=yield_col,
-        scatter_kws={'alpha': 0.6, 's': 40, 'color': PROFESSIONAL_PALETTE['primary']},
-        line_kws={'color': PROFESSIONAL_PALETTE['secondary'], 'linewidth': 2},
-        ax=ax
-    )
-    
-    ax.set_title('🌡️ Temperatura vs Rendimiento', fontsize=14, fontweight='bold', pad=20)
-    ax.set_xlabel(temp_col, fontsize=11)
-    ax.set_ylabel(yield_col, fontsize=11)
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    return fig
-
-# ============================================================================
-# 📊 GRÁFICO 3: Distribución de Precipitación
-# ============================================================================
-def plot_precipitation_distribution(df):
-    """Boxplot con Seaborn"""
+def plot_solar_by_municipality(df):
+    """
+    Boxplot de brillo solar por municipio
+    ✅ hue parameter para evitar FutureWarning
+    """
     fig, ax = plt.subplots(figsize=(12, 6))
     
-    precip_col = next((c for c in df.columns if 'precip' in c.lower()), None)
-    mun_col = next((c for c in df.columns if 'municipio' in c.lower()), None)
+    # Buscar columnas reales según BackupBD.sql
+    solar_col = None
+    mun_col = None
     
-    if precip_col is None:
-        ax.text(0.5, 0.5, 'Datos de precipitación no disponibles', ha='center', va='center', transform=ax.transAxes)
+    for col in df.columns:
+        if 'brillo' in col.lower() or 'solar' in col.lower():
+            solar_col = col
+            break
+    
+    for col in df.columns:
+        if 'municipio' in col.lower() or 'municip' in col.lower():
+            mun_col = col
+            break
+    
+    if solar_col is None:
+        ax.text(0.5, 0.5, 'Datos de brillo solar no disponibles', 
+                ha='center', va='center', transform=ax.transAxes)
         return fig
     
-    df_plot = df[[precip_col]].dropna()
     if mun_col and mun_col in df.columns:
-        df_plot = df[[precip_col, mun_col]].dropna()
-    
-    if mun_col and mun_col in df_plot.columns and len(df_plot[mun_col].unique()) > 1:
-        sns.boxplot(
-            data=df_plot,
-            x=mun_col,
-            y=precip_col,
-            hue=mun_col,  # ✅ EVITA WARNING
-            palette=SEABORN_PALETTE[:len(df_plot[mun_col].unique())],
-            ax=ax,
-            linewidth=1.5,
-            legend=False
-        )
+        df_plot = df[[solar_col, mun_col]].dropna()
+        
+        if len(df_plot[mun_col].unique()) > 1:
+            # ✅ Asignar hue para evitar FutureWarning (según logs)
+            sns.boxplot(
+                data=df_plot,
+                x=mun_col,
+                y=solar_col,
+                hue=mun_col,  # ✅ EVITA WARNING
+                palette=SEABORN_PALETTE[:len(df_plot[mun_col].unique())],
+                ax=ax,
+                linewidth=1.5,
+                legend=False  # ✅ Ocultar leyenda redundante
+            )
+        else:
+            sns.boxplot(
+                data=df_plot,
+                y=solar_col,
+                color=PROFESSIONAL_PALETTE['secondary'],
+                ax=ax,
+                linewidth=1.5
+            )
     else:
+        df_plot = df[[solar_col]].dropna()
         sns.boxplot(
             data=df_plot,
-            y=precip_col,
+            y=solar_col,
             color=PROFESSIONAL_PALETTE['secondary'],
             ax=ax,
             linewidth=1.5
         )
     
-    ax.set_title('🌧️ Distribución de Precipitación', fontsize=14, fontweight='bold', pad=20)
-    ax.set_ylabel('Precipitación (mm)', fontsize=11)
+    ax.set_title('☀️ Distribución de Brillo Solar por Municipio', 
+                 fontsize=14, fontweight='bold', pad=20)
+    ax.set_ylabel('Horas de Sol Efectivas', fontsize=11)
     ax.grid(True, axis='y', alpha=0.3)
+    
+    plt.tight_layout()
+    return fig
+
+# ============================================================================
+# 📉 GRÁFICO 3: Tendencia Temporal de Brillo Solar
+# ============================================================================
+def plot_solar_trend(df):
+    """
+    Línea de tendencia temporal
+    ✅ width='stretch' en lugar de use_container_width
+    """
+    # Buscar columnas de fecha y brillo solar
+    date_col = None
+    solar_col = None
+    
+    for col in df.columns:
+        if 'fecha' in col.lower() or 'date' in col.lower():
+            date_col = col
+            break
+    
+    for col in df.columns:
+        if 'brillo' in col.lower() or 'solar' in col.lower():
+            solar_col = col
+            break
+    
+    if date_col is None or solar_col is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.text(0.5, 0.5, 'Datos temporales no disponibles', 
+                ha='center', va='center', transform=ax.transAxes)
+        return fig
+    
+    df_plot = df[[date_col, solar_col]].copy()
+    df_plot[date_col] = pd.to_datetime(df_plot[date_col], errors='coerce')
+    df_plot[solar_col] = pd.to_numeric(df_plot[solar_col], errors='coerce')
+    df_plot = df_plot.dropna()
+    
+    if len(df_plot) < 2:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.text(0.5, 0.5, 'Datos insuficientes', 
+                ha='center', va='center', transform=ax.transAxes)
+        return fig
+    
+    # Agrupar por fecha si hay múltiples registros
+    df_grouped = df_plot.groupby(date_col)[solar_col].mean().reset_index()
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    ax.plot(df_grouped[date_col], df_grouped[solar_col], 
+            color=PROFESSIONAL_PALETTE['accent'], linewidth=2, marker='o', markersize=3)
+    ax.fill_between(df_grouped[date_col], df_grouped[solar_col], 
+                    alpha=0.3, color=PROFESSIONAL_PALETTE['accent'])
+    
+    ax.set_title('📈 Tendencia Temporal de Brillo Solar', 
+                 fontsize=14, fontweight='bold', pad=20)
+    ax.set_xlabel('Fecha', fontsize=11)
+    ax.set_ylabel('Horas de Sol', fontsize=11)
+    ax.grid(True, alpha=0.3)
+    plt.xticks(rotation=45, ha='right')
     
     plt.tight_layout()
     return fig
@@ -381,9 +421,14 @@ def plot_correlation_heatmap(df):
     """Mapa de calor de correlaciones"""
     numeric_cols = df.select_dtypes(include='number').columns.tolist()
     
+    # Excluir coordenadas del heatmap
+    numeric_cols = [col for col in numeric_cols 
+                   if 'latitud' not in col.lower() and 'longitud' not in col.lower()]
+    
     if len(numeric_cols) < 2:
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.text(0.5, 0.5, 'Datos insuficientes', ha='center', va='center', transform=ax.transAxes)
+        ax.text(0.5, 0.5, 'Datos insuficientes para correlaciones', 
+                ha='center', va='center', transform=ax.transAxes)
         return fig
     
     corr_matrix = df[numeric_cols].corr()
@@ -409,6 +454,37 @@ def plot_correlation_heatmap(df):
     return fig
 
 # ============================================================================
+# 📊 GRÁFICO 5: Dispersión con Trendline (Plotly - CORREGIDO)
+# ============================================================================
+def plot_scatter_with_trendline(df, var_x, var_y):
+    """
+    Gráfico de dispersión con línea de tendencia
+    ✅ Validación de columnas únicas
+    """
+    if var_x not in df.columns or var_y not in df.columns:
+        return None
+    
+    plot_df = df[[var_x, var_y]].copy()
+    plot_df = plot_df.dropna()
+    plot_df = plot_df.loc[:, ~plot_df.columns.duplicated()]
+    
+    if len(plot_df) < 2:
+        return None
+    
+    fig_rel = px.scatter(
+        plot_df,
+        x=var_x,
+        y=var_y,
+        trendline="ols",
+        title=f"Correlación: {var_x} vs {var_y}",
+        color_discrete_sequence=[PROFESSIONAL_PALETTE['primary']]
+    )
+    
+    fig_rel.update_layout(height=500)
+    
+    return fig_rel
+
+# ============================================================================
 # 🎯 APLICACIÓN PRINCIPAL
 # ============================================================================
 def main():
@@ -425,35 +501,34 @@ def main():
     
     st.success(f"✅ {len(df)} registros cargados correctamente")
     
-    # Mostrar columnas reales para debug
-    with st.expander("📋 Ver columnas disponibles en tu BD"):
-        st.write(df.columns.tolist())
-        st.info("💡 Las columnas de coordenadas deben llamarse: `latitud`, `longitud`, `latitude`, o `longitude`")
-    
-    # Detectar columnas de coordenadas REALES
+    # Detectar columnas reales
     lat_col, lon_col = detect_coordinate_columns(df)
+    
+    # Mostrar columnas para debug
+    with st.expander("📋 Ver columnas disponibles (BackupBD.sql)"):
+        st.write(df.columns.tolist())
+        st.info(f"""
+        **Coordenadas detectadas:**
+        - Latitud: `{lat_col}`
+        - Longitud: `{lon_col}`
+        
+        **Municipios en datos:** {df['municipio'].nunique() if 'municipio' in df.columns else 'N/A'}
+        """)
     
     # Sidebar
     with st.sidebar:
         st.header("⚙️ Panel de Control")
         
-        st.markdown(f"""
-        ### 📍 Coordenadas Detectadas
-        - **Latitud**: `{lat_col}` 
-        - **Longitud**: `{lon_col}`
-        """)
-        
         # Selector de municipio
-        mun_col = next((c for c in df.columns if 'municipio' in c.lower()), None)
-        if mun_col:
+        if 'municipio' in df.columns:
             municipio = st.selectbox(
                 "📍 Seleccionar Municipio",
-                options=["Todos"] + list(df[mun_col].unique()),
+                options=["Todos"] + list(df['municipio'].unique()),
                 help="Filtra por ubicación geográfica"
             )
             
             if municipio != "Todos":
-                df = df[df[mun_col] == municipio]
+                df = df[df['municipio'] == municipio]
         
         st.divider()
         
@@ -461,21 +536,28 @@ def main():
         st.subheader("📈 Indicadores Clave")
         num_cols = df.select_dtypes(include='number').columns.tolist()
         
+        if len(num_cols) >= 1:
+            # Brillo solar promedio
+            solar_col = next((c for c in num_cols if 'brillo' in c.lower() or 'solar' in c.lower()), num_cols[0])
+            st.metric(
+                label="Brillo Solar Promedio",
+                value=f"{df[solar_col].mean():.2f} horas",
+                delta=f"{df[solar_col].std():.2f} σ"
+            )
+        
         if len(num_cols) >= 2:
             col1, col2 = st.columns(2)
             with col1:
-                metric_col = next((c for c in num_cols if 'rendimiento' in c.lower()), num_cols[0])
                 st.metric(
-                    label="Rendimiento Promedio",
-                    value=f"{df[metric_col].mean():.2f}",
-                    delta=f"{df[metric_col].std():.2f} σ"
+                    label="Registros",
+                    value=len(df)
                 )
             with col2:
-                precip_col = next((c for c in num_cols if 'precip' in c.lower()), num_cols[1] if len(num_cols) > 1 else num_cols[0])
-                st.metric(
-                    label="Precipitación Total",
-                    value=f"{df[precip_col].sum():.0f} mm"
-                )
+                if 'municipio' in df.columns:
+                    st.metric(
+                        label="Municipios",
+                        value=df['municipio'].nunique()
+                    )
     
     # === PESTAÑAS ===
     tab_analisis, tab_documentacion, tab_config = st.tabs([
@@ -486,15 +568,16 @@ def main():
     
     # ── PESTAÑA 1: GRÁFICOS ──
     with tab_analisis:
-        st.subheader("🔍 Exploración de Datos")
+        st.subheader("🔍 Exploración de Datos Climáticos")
         
-        # Fila 1: Mapa y Correlación
+        # Fila 1: Mapa y Boxplot
         col_graf1, col_graf2 = st.columns(2)
         
         with col_graf1:
             st.markdown("### 🗺️ Mapa Interactivo")
-            st.info(f"📍 Usando coordenadas: `{lat_col}`, `{lon_col}`")
+            st.info(f"📍 Coordenadas: `{lat_col}`, `{lon_col}`")
             
+            # Variable para mapa (brillo solar u otra numérica)
             map_var = next((c for c in df.select_dtypes(include='number').columns 
                            if c not in [lat_col, lon_col]), None)
             
@@ -505,18 +588,18 @@ def main():
                 st.warning("⚠️ Configura columnas latitud/longitud en tu BD")
         
         with col_graf2:
-            st.markdown("### 🌡️ Temperatura vs Rendimiento")
-            fig1 = plot_correlation_temp_yield(df)
+            st.markdown("### ☀️ Brillo Solar por Municipio")
+            fig1 = plot_solar_by_municipality(df)
             st.pyplot(fig1, width='stretch')  # ✅ CORREGIDO
         
         st.divider()
         
-        # Fila 2: Boxplot y Heatmap
+        # Fila 2: Tendencia y Heatmap
         col_graf3, col_graf4 = st.columns(2)
         
         with col_graf3:
-            st.markdown("### 🌧️ Precipitación")
-            fig2 = plot_precipitation_distribution(df)
+            st.markdown("### 📈 Tendencia Temporal")
+            fig2 = plot_solar_trend(df)
             st.pyplot(fig2, width='stretch')  # ✅ CORREGIDO
         
         with col_graf4:
@@ -526,29 +609,49 @@ def main():
         
         st.divider()
         
+        # Fila 3: Dispersión Personalizada
+        st.subheader("📉 Análisis de Correlación Personalizado")
+        num_cols = df.select_dtypes(include='number').columns.tolist()
+        num_cols = [c for c in num_cols if c not in [lat_col, lon_col]]
+        
+        if len(num_cols) >= 2:
+            col_sel1, col_sel2 = st.columns(2)
+            with col_sel1:
+                var_x = st.selectbox("Factor (X)", num_cols[:-1], key='var_x')
+            with col_sel2:
+                var_y = st.selectbox("Resultado (Y)", num_cols, index=len(num_cols)-1, key='var_y')
+            
+            if var_x != var_y:
+                fig_reg = plot_scatter_with_trendline(df, var_x, var_y)
+                if fig_reg:
+                    st.plotly_chart(fig_reg, width='stretch')  # ✅ CORREGIDO
+        
         # Datos raw
         with st.expander("📄 Ver datos brutos"):
             st.dataframe(df.head(100), width='stretch', hide_index=True)
     
     # ── PESTAÑA 2: DOCUMENTACIÓN ──
     with tab_documentacion:
-        st.header("📚 Documentación")
+        st.header("📚 Documentación Técnica")
         
         st.markdown(f"""
-        ### 🗄️ Estructura de Base de Datos Detectada
+        ### 🗄️ Estructura de Base de Datos (BackupBD.sql)
         
-        **Columnas encontradas**: {len(df.columns)}
+        **Columnas detectadas**: {len(df.columns)}
         
         **Coordenadas de Municipio**:
         - Latitud: `{lat_col}` (rango: {df[lat_col].min():.4f} a {df[lat_col].max():.4f})
         - Longitud: `{lon_col}` (rango: {df[lon_col].min():.4f} a {df[lon_col].max():.4f})
         
-        ### 🔐 Configuración de Secrets
+        **Municipios disponibles**: 
+        {', '.join(df['municipio'].unique()) if 'municipio' in df.columns else 'N/A'}
         
-        En Streamlit Cloud:
-        1. Ve a tu app → **Settings** ⚙️
-        2. Despliega **Secrets**
-        3. Agrega:
+        ### 🔐 Configuración de Secrets (Streamlit Cloud)
+        
+        1. Ve a [share.streamlit.io](https://share.streamlit.io)
+        2. Selecciona tu app → **Settings** ⚙️
+        3. Despliega **Secrets**
+        4. Agrega:
         ```toml
         [connections.railway_db]
         dialect = "mysql"
@@ -558,6 +661,13 @@ def main():
         username = "root"
         password = "tu_contraseña"
         ```
+        
+        ### 📊 Gráficos Implementados
+        
+        1. **Mapa Interactivo**: scatter_map con coordenadas reales
+        2. **Boxplot**: Distribución de brillo solar por municipio
+        3. **Tendencia Temporal**: Evolución de brillo solar
+        4. **Heatmap**: Matriz de correlaciones múltiples
         """)
     
     # ── PESTAÑA 3: CONFIGURACIÓN ──
@@ -572,7 +682,8 @@ def main():
         st.markdown("""
         <div class="metric-card">
         <strong>Última sincronización:</strong><br>
-        <span style="color: #15803d">●</span> Hace < 1 minuto
+        <span style="color: #15803d">●</span> Hace < 1 minuto<br>
+        <small>Próxima actualización: 5 minutos</small>
         </div>
         """, unsafe_allow_html=True)
     
@@ -580,7 +691,7 @@ def main():
     st.divider()
     st.markdown("""
     <div style="text-align: center; color: #64748b; font-size: 0.9em; padding: 20px;">
-        🌾 Agro-Clima Intelligence Pro v5.0 • Streamlit Cloud + Railway
+        🌾 Agro-Clima Intelligence Pro v6.0 • Streamlit Cloud + Railway
     </div>
     """, unsafe_allow_html=True)
 
