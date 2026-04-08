@@ -10,19 +10,6 @@ Puedes interactuar con la plataforma aquí:
 
 📋 **Descripción del Proyecto**
 
-Esta plataforma es una herramienta avanzada de Business Intelligence aplicada al sector agrícola y climático. El sistema integra múltiples fuentes de datos para analizar y predecir el rendimiento de las cosechas en diferentes municipios de la región.
-
-
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white  )
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white  )
-![Pandas](https://img.shields.io/badge/Pandas-150458?style=for-the-badge&logo=pandas&logoColor=white  )
-![Plotly](https://img.shields.io/badge/Plotly-3F4F75?style=for-the-badge&logo=plotly&logoColor=white  )
-![Kaggle](https://img.shields.io/badge/Kaggle-20BEFF?style=for-the-badge&logo=Kaggle&logoColor=white  )
-
-🌱 Agro-Clima Intelligence Pro
-
-📋 Descripción del Proyecto
-
 Esta plataforma es una herramienta avanzada de Business Intelligence aplicada al sector agrícola y climático. El sistema integra múltiples fuentes de datos para analizar la relación entre las variables meteorológicas y el rendimiento de las cosechas en diferentes municipios de la región.
 
 La aplicación permite la ingesta de datos desde archivos Excel (.xlsx), CSV y bases de datos SQL (SQLite) de manera automática y centralizada, ofreciendo un dashboard interactivo para la toma de decisiones.
