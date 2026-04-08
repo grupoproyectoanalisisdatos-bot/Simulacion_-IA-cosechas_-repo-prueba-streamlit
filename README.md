@@ -1,3 +1,18 @@
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)
+
+# 🌱 Agro-Clima Intelligence Pro
+
+### 🔗 Acceso Directo a la Aplicación
+Puedes interactuar con la plataforma aquí:
+👉 **[https://app-mi-proyecto-clima.streamlit.app/](https://app-mi-proyecto-clima.streamlit.app/)**
+
+---
+
+📋 **Descripción del Proyecto**
+
+Esta plataforma es una herramienta avanzada de Business Intelligence aplicada al sector agrícola y climático. El sistema integra múltiples fuentes de datos para analizar y predecir el rendimiento de las cosechas en diferentes municipios de la región.
+
+
 ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white  )
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white  )
 ![Pandas](https://img.shields.io/badge/Pandas-150458?style=for-the-badge&logo=pandas&logoColor=white  )
