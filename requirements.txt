@@ -11,6 +11,9 @@ plotly
 sqlalchemy
 mysql-connector-python
 pymysql
+joblib
+scikit-learn
+
 
 
 
