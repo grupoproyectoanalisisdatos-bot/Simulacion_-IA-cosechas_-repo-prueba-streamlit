@@ -1,9 +1,11 @@
 import streamlit as st
-import pandas as pd
 from sqlalchemy import create_engine, text
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import time
+from functools import wraps
 
 # ─────────────────────────────────────────────
 # CONFIGURACIÓN DE PÁGINA
@@ -220,30 +222,77 @@ COLORES_MUNICIPIOS = {
 # ─────────────────────────────────────────────
 # CONEXIÓN A BASE DE DATOS
 # ─────────────────────────────────────────────
+def _get_mysql_config():
+    cfg = st.secrets.get("mysql", {})
+    user = cfg.get("DB_USER") or cfg.get("user")
+    password = cfg.get("DB_PASSWORD") or cfg.get("password")
+    host = cfg.get("DB_HOST") or cfg.get("host")
+    port = cfg.get("DB_PORT") or cfg.get("port")
+    database = cfg.get("DB_NAME") or cfg.get("database")
+
+    required = {"user": user, "password": password, "host": host, "port": port, "database": database}
+    missing = [key for key, value in required.items() if value in (None, "")]
+    if missing:
+        raise ValueError(
+            "Faltan variables de MySQL en .streamlit/secrets.toml. "
+            "Revisa DB_USER, DB_PASSWORD, DB_HOST, DB_PORT y DB_NAME. "
+            f"Valores faltantes: {missing}"
+        )
+    return user, password, host, port, database
+
+
+def retry_query(max_retries=3, delay_seconds=2):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_retries:
+                        time.sleep(delay_seconds)
+                        continue
+            st.error(f"❌ Error en consulta: {last_error}")
+            return pd.DataFrame()
+        return wrapper
+    return decorator
+
+
 @st.cache_resource
 def get_engine():
     try:
-        cfg = st.secrets["mysql"]
+        user, password, host, port, database = _get_mysql_config()
         url = (
-            f"mysql+pymysql://{cfg['DB_USER']}:{cfg['DB_PASSWORD']}"
-            f"@{cfg['DB_HOST']}:{cfg['DB_PORT']}/{cfg['DB_NAME']}"
+            f"mysql+pymysql://{user}:{password}"
+            f"@{host}:{port}/{database}"
         )
-        engine = create_engine(url, pool_pre_ping=True, pool_recycle=3600)
+        engine = create_engine(
+            url,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+            connect_args={
+                "connect_timeout": 30,
+                "read_timeout": 120,
+                "write_timeout": 60,
+            },
+            pool_size=5,
+            max_overflow=10,
+        )
         return engine
     except Exception as e:
         st.error(f"❌ Error de conexión: {e}")
         return None
 
+
+@retry_query(max_retries=3, delay_seconds=2)
 def query_db(sql: str) -> pd.DataFrame:
     engine = get_engine()
     if engine is None:
         return pd.DataFrame()
-    try:
-        with engine.connect() as conn:
-            return pd.read_sql(text(sql), conn)
-    except Exception as e:
-        st.error(f"❌ Error en consulta: {e}")
-        return pd.DataFrame()
+    with engine.connect() as conn:
+        return pd.read_sql(text(sql), conn)
 
 # ─────────────────────────────────────────────
 # CARGA DE DATOS
